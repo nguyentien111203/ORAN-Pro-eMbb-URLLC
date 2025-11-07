@@ -1,5 +1,4 @@
 # Alternating training: DQN (slot-level) <-> SAC (frame-level)
-import os
 import numpy as np
 import torch
 from tqdm import trange, tqdm

@@ -22,7 +22,8 @@ class FrameEnv(gym.Env):
         self.slot_count = 0
 
         # state: avg_thr_norm, success_ratio, fairness
-        self.state_dim = 4
+        self.state_dim = 4 + 3 * self.num_slices + 2 * self.num_rus + \
+            (self.num_rus * self.num_slices) + 1
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(self.state_dim,), dtype=np.float32)
 
         # action: slice-level ratios (num_slices,)
@@ -138,14 +139,13 @@ class FrameEnv(gym.Env):
         reward = (w["thr"] * (np.average(sumeMBB_frame)/self.T_max) +  
                 w["sla"] * (np.average(sla_eMBB) - self.sla_slices["eMBB"]) + 
                 w["sla"] * (np.average(sla_URLLC) - self.sla_slices["eMBB"]) + 
-                w["stab"] * stability + 
+                w["stab"] * np.average(stab) + 
                 w["fair"] * np.average(jain) +
                 w["util"] * np.average(util))
 
         # update state
         self.last_quota = action.copy()
-        self.last_state = np.array([np.average(sumeMBB_frame), 
-                                    np.average(sla_URLLC), np.average(jain), stability], dtype=float)
+        self.last_state = self.get_state(sumeMBB_frame, sla_URLLC, jain, stab)
         self.frame_count += 1
         done = False  # episodes managed in training loop
 
@@ -274,6 +274,69 @@ class FrameEnv(gym.Env):
             return 1.0
         return float(np.clip(total_served / (total_served + total_dropped + 1e-9), 0.0, 1.0))
 
+    def get_state(self, sumeMBB_frame, sla_URLLC, jain, stability):
+        """
+        Sinh state vector chi tiết cho SAC agent ở mức frame.
+        Bao gồm thông tin toàn cục và chi tiết từng slice/RU.
+        """
+
+        # ==== 1. Thông tin tổng thể ====
+        avg_thr = np.average(sumeMBB_frame) / (self.T_max + 1e-9)
+        avg_sla_url = np.average(sla_URLLC)
+        avg_jain = np.average(jain)
+        avg_stability = np.average(stability)
+
+        # ==== 2. Thông tin từng slice ====
+        slice_buffers = []
+        slice_sla = []
+        slice_thr = []
+
+        for sl in self.slices:
+            buf = getattr(sl, "buffer", 0.0)
+            thr = np.mean(getattr(sl, "rate_history", [0.0])[-5:]) if hasattr(sl, "rate_history") else 0.0
+            served = getattr(sl, "served_packets", 0)
+            dropped = getattr(sl, "dropped_packets", 0)
+            sla = served / (served + dropped + 1e-9)
+
+            slice_buffers.append(buf)
+            slice_thr.append(thr)
+            slice_sla.append(sla)
+
+        # Chuẩn hóa theo max để tránh scale quá lớn
+        buf_norm = np.array(slice_buffers) / (np.max(slice_buffers) + 1e-9)
+        thr_norm = np.array(slice_thr) / (self.T_max + 1e-9)
+        sla_norm = np.clip(np.array(slice_sla), 0, 1)
+
+        # ==== 3. Thông tin per-RU ====
+        ru_utils = []
+        ru_powers = []
+        for env in self.slot_envs:
+            util = np.count_nonzero(env.x_alloc) / (env.num_PRB + 1e-9)
+            ru_utils.append(util)
+            ru_powers.append(np.sum(getattr(env, "power_budget", np.zeros(self.num_slices))) / (env.Pmax + 1e-9))
+
+        ru_utils = np.clip(ru_utils, 0, 1)
+        ru_powers = np.clip(ru_powers, 0, 1)
+
+        # ==== 4. Quota stability ====
+        delta_quota = np.mean(np.abs(self.last_quota - getattr(self, "prev_quota", self.last_quota)))
+        quota_norm = self.last_quota / (np.sum(self.last_quota) + 1e-9)
+
+        # ==== 5. Gộp thành vector ====
+        global_features = np.array([avg_thr, avg_sla_url, avg_jain, avg_stability], dtype=float)
+        state = np.concatenate([
+            global_features,
+            buf_norm, thr_norm, sla_norm,
+            ru_utils, ru_powers,
+            quota_norm,
+            [delta_quota]
+        ], dtype=float)
+
+        # Cập nhật self.last_state để log/debug
+        self.prev_quota = self.last_quota.copy()
+        self.last_state = state.copy()
+
+        return state.astype(np.float32)
 
 
 
