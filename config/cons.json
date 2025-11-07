@@ -1,0 +1,10 @@
+{
+    "B_MHz": 0.18,  
+    "N0_mW_per_MHz": 7.62e-8,
+    "n" : 168,
+    "T_slot": 0.001,
+    "num_slot_per_frame": 10,
+    "w_reward" : {"thr": 0.4, "sla": 0.4, "stab": 0.1, "fair": 0.1, "util": 0.1},
+    "sla_slices" : {"eMBB" : 0.5, "URLLC" : 0.5},
+    "T_max_Mbps": 100
+}
