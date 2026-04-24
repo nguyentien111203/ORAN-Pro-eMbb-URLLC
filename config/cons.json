@@ -1,10 +1,11 @@
 {
     "B_MHz": 0.18,  
-    "N0_mW_per_MHz": 7.62e-8,
+    "N0_mW_per_MHz": 3.98e-12,
     "n" : 168,
     "T_slot": 0.001,
     "num_slot_per_frame": 10,
-    "w_reward" : {"thr": 0.4, "sla": 0.4, "stab": 0.1, "fair": 0.1, "util": 0.1},
-    "sla_slices" : {"eMBB" : 0.5, "URLLC" : 0.5},
+    "NF_dB": 5,
+    "w_reward" : {"thr": 1.2, "slaeMBB": 0.4, "slaURLLC": 0.35, "stab": 0.05, "utilPower": 0.05, "utilPRB": 0.005, "waste": 0.3},
+    "sla_slices" : {"eMBB" : 0.5, "URLLC" : 0.5},   
     "T_max_Mbps": 100
 }

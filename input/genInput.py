@@ -1,6 +1,7 @@
 from system.RU import RadioUnits
 from system.slices import URLLCSlice, eMBBslice
 import numpy as np
+from input.genTopo import generate_topology, calDistance, plot_topology
 
 def generateRUs(num_RUs, K, B, n, N0, P_max):
     set_RU = []
@@ -10,10 +11,6 @@ def generateRUs(num_RUs, K, B, n, N0, P_max):
     
     return set_RU
 
-
-import numpy as np
-
-import numpy as np
 
 def generate_channel_gain(R, frame_slot, I, K, model="rayleigh", K_factor=5, seed=None):
     """
@@ -65,14 +62,38 @@ def generate_channel_gain(R, frame_slot, I, K, model="rayleigh", K_factor=5, see
     else:
         raise ValueError(f"Unknown channel model: {model}")
 
-    # Path loss: ngẫu nhiên từ 100 đến 130 dB
-    path_loss_db = np.random.uniform(90, 120, size=(R, frame_slot, I, K))
-    path_loss_lin = 10 ** (-path_loss_db / 10)
+    # ---- LARGE-SCALE: distances & pathloss (fixed per frame) ----
+    # sample distances per RU-UE (shape (R,I));
+    ru_pos, ue_pos = generate_topology(num_RUs=R,num_UEs=I)
+    plot_topology(ru_pos, ue_pos, du_cu_pos=(0,0), R_cell=50,R_ru=250)
+    dist_ue_ru, dist_ru_ru = calDistance(num_UEs=I, num_RUs=R,ru_pos=ru_pos, ue_pos=ue_pos)
+
+    # FSPL in dB 
+    f = 3.5
+    # f in GHz, distance in meters
+    FSPL_dB_ru_ue = 32.4 + 20*np.log10(f) + 20*np.log10(dist_ue_ru)
+    FSPL_dB_ru_ru = 32.4 + 20*np.log10(f) + 20*np.log10(dist_ru_ru)
+
+    #FSPL_dB = 120.8 + 37.5*np.log10(d)  # Phục vụ kịch bản thử
+
+    # shadowing (log-normal) per RU-UE (dB)
+    sigma_sh = 6.0  # dB, choose 4..8 dB depending LOS/NLOS
+    shadowing_dB_ru_ue = np.random.normal(0.0, sigma_sh, size=(R, I))
+    shadowing_dB_ru_ru = np.random.normal(0.0, sigma_sh, size=(R, R))
+
+    # total pathloss (dB) and linear power gain (unitless)
+    PL_dB_ru_ue = FSPL_dB_ru_ue + shadowing_dB_ru_ue      # shape (R,I)
+    path_loss_lin = 10.0 ** (-PL_dB_ru_ue / 10.0)   # power-domain gain. shape (R,I)
+    path_loss_lin_exp = path_loss_lin[:, np.newaxis, :, np.newaxis]
+
+    # gain for ru - ru
+    gain_ru_ru =  10.0 ** (-(FSPL_dB_ru_ru + shadowing_dB_ru_ru) / 10.0)
 
     # Tổng độ lợi kênh: fading × path loss
-    H = fading * path_loss_lin
+    H = (fading**2) * path_loss_lin_exp
 
-    return H
+    return H, gain_ru_ru, dist_ue_ru
+
 
 def generate_pipeline_inputs(num_RUs, num_slices, num_URLLC, numPRB, B, n, N0, frame_slot, 
                              P_max, deadline, load, dataRate):
@@ -88,12 +109,12 @@ def generate_pipeline_inputs(num_RUs, num_slices, num_URLLC, numPRB, B, n, N0, f
     # --- Tạo slices ---
     slices = []
     for i in range(num_slices):
-        if i < num_URLLC:  # phần lớn là URLLC
-            slices.append(URLLCSlice(lam=30, D=deadline, L=load, eps=1e-4, eps_phy=1e-5))
+        if i < num_URLLC:  # phần đầu là URLLC
+            slices.append(URLLCSlice(D=np.random.randint(1,4), L=load, eps=1e-4, eps_phy=1e-5))
         else:  # cuối cùng là eMBB
             slices.append(eMBBslice(dataRate=dataRate))
 
     # --- Tạo channel gain matrix ---
-    H = generate_channel_gain(num_RUs, frame_slot, num_slices, numPRB)
+    H, gain_ru_ru, dist_ue_ru = generate_channel_gain(num_RUs, frame_slot, num_slices, numPRB)
 
-    return RUs, slices, H
+    return RUs, slices, H, gain_ru_ru, dist_ue_ru

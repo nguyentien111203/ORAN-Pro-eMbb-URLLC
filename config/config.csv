@@ -1,2 +1,15 @@
 num_RUs,num_slices,num_URLLC,num_PRB_per_RU,Pmax_mW,deadline,load_URLLC,dataRate_eMBB_Mbps
-2,10,5,50,100,1,0.016,20
+3,30,20,52,300,1,0.04,5
+
+3,15,5,52,300,1,0.04,5
+3,20,10,52,300,1,0.04,5
+3,25,15,52,300,1,0.04,5
+
+
+
+
+
+
+
+
+

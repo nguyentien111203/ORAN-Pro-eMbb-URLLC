@@ -52,7 +52,9 @@ def plot_and_save_metrics(results, save_dir, num_slices, num_urllc):
         "eMBB Throughput (Mbps)": results["throughput"],
         "SLA eMBB": results["SLA_eMBB"],
         "SLA URLLC": results["SLA_URLLC"],
-        "Jain Index": results["Jain_Index"]
+        "utilPower": results["utilPower"],
+        "stability": results["stability"],
+        "utilPRB": results["utilPRB"]
     }
 
     #metrics = {

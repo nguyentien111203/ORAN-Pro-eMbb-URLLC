@@ -32,14 +32,13 @@ class MLP(nn.Module):
 
 class GaussianPolicy(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dims=(256, 256),
-                 log_std_min=-20, log_std_max=2,
+                 log_std_min=-5.0, log_std_max=0.3,
                  action_scale=1.0, action_bias=0.0, device="cpu"):
         super().__init__()
         self.net = MLP(state_dim, 2 * action_dim, hidden_dims)
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
 
-        # Scale & bias để map từ [-1, 1] sang domain thực tế
         self.register_buffer("action_scale", torch.tensor(action_scale).to(device))
         self.register_buffer("action_bias", torch.tensor(action_bias).to(device))
 
@@ -51,20 +50,46 @@ class GaussianPolicy(nn.Module):
 
     def sample(self, state):
         mean, log_std = self.forward(state)
-        mean = torch.tanh(mean)
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
-        x_t = normal.rsample()  # reparameterization trick
+
+        # ---- 1) Sample pre-tanh ----
+        x_t = normal.rsample()
+
+        # clamp pre-tanh to avoid extreme saturation
+        x_t = torch.clamp(x_t, -8.0, 8.0)
+
+        # ---- 2) Apply tanh squash ----
         y_t = torch.tanh(x_t)
+        # avoid exact ±1.0 to keep log(1 - y^2) finite
+        y_t = torch.clamp(y_t, -0.999, 0.999)
+
+        # ---- 3) Compute correct log-prob with tanh correction ----
+        # raw normal log_prob
+        raw_lp = normal.log_prob(x_t)                     # [B, act_dim]
+        raw_lp_sum = raw_lp.sum(dim=-1, keepdim=True)     # [B, 1]
+
+        # tanh jacobian correction
+        jac = torch.log(1 - y_t.pow(2) + 1e-6)            # <= 0
+        jac = torch.clamp(jac, min=-3.0, max=0.0)         # avoid huge spikes
+        jac_sum = jac.sum(dim=-1, keepdim=True)           # [B, 1]
+
+        # final correct log_prob
+        log_prob = raw_lp_sum - jac_sum                   # [B, 1]
+
+        # ---- 4) Produce final action ----
         action = y_t * self.action_scale + self.action_bias
 
-        # Tính log_prob với squash correction
-        log_prob = normal.log_prob(x_t)
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
-        log_prob = log_prob.sum(dim=-1, keepdim=True)
+        # ---- 5) Debug (optional) ----
+        #with torch.no_grad():
+        #    frac_saturated = (y_t.abs() > 0.995).float().mean().item()
+        #    max_abs_y = float(y_t.abs().max().item())
+            #print(f"[DBG] tanh saturate fraction = {frac_saturated:.4f}, max|y| = {max_abs_y:.4f}")
 
         return action, log_prob, mean
-    
+
+
+
 
 # Replay Buffer
 class ReplayBuffer:

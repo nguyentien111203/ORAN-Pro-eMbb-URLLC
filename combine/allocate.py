@@ -74,7 +74,10 @@ def run_oran_allocation_pipeline(
     slices: list,
     RUs: list,
     H: np.ndarray,
+    gain_ru_ru : np.ndarray,
+    dist_ru_ue : np.ndarray,
     T_max: float,
+    NF : float,
     w_reward: dict,
     sla_slices: dict,
     num_urllc: int,
@@ -131,8 +134,11 @@ def run_oran_allocation_pipeline(
             slices=slices,
             num_urllc=num_urllc,
             H=H[i][0],           # slot đầu tiên
+            gain_ru=gain_ru_ru[i],
+            dist_ru_ue=dist_ru_ue[i],
             T_slot=1,
             T_max=T_max,
+            NF=NF,
             eps=0.1,
             max_steps=frame_slots,
             w_reward=w_reward
@@ -143,10 +149,11 @@ def run_oran_allocation_pipeline(
     num_slices = len(slices)
 
     # ===== Load mô hình SAC =====
-    sac_agent = SACAgent(num_RU, state_dim=4, num_slices=num_slices, device=device)
+    sac_agent = SACAgent(num_RU, state_dim=6 + num_slices + 2 * num_RU + 1, 
+                         num_slices=num_slices, device=device)
     actor, critic_1, critic_2, alpha = load_sac_components(
                                             sac_model_path=sac_model_path,
-                                            state_dim=4,
+                                            state_dim= 6 + num_slices + 2 * num_RU + 1,
                                             num_RU=num_RU,
                                             num_slices=num_slices,
                                             action_scale=1.0,
@@ -179,6 +186,7 @@ def run_oran_allocation_pipeline(
         slices=slices,
         num_urllc=num_urllc,
         H=H,
+        gain_ru_ru=gain_ru_ru,
         T_max=T_max,
         w_reward=w_reward,
         sla_slices=sla_slices,
@@ -186,10 +194,17 @@ def run_oran_allocation_pipeline(
     )
 
     # ===== Chạy mô phỏng chính =====
-    results = []
+    results = {
+            "frame": [],
+            "decision_time_ms": [],
+            "throughput": [],
+            "SLA_eMBB": [],
+            "SLA_URLLC": [],
+            "utilPower": [],
+            "stability": [],
+            "utilPRB": []
+        }
     decisions = []
-    total_thr = total_sla_embb = total_sla_urllc = total_jain = total_decision_time = total_util = 0.0
-
     state_frame = frame_env.reset()
     for frame_idx in range(num_frames):
         start_time = time.time()
@@ -199,46 +214,27 @@ def run_oran_allocation_pipeline(
         next_state, reward, done, info = frame_env.step(sac_action)
         state_frame = next_state
 
-        total_decision_time += decision_time
-        decisions.append(decision_time * 1000)
-        total_thr += sum(info["eMBB_thr"])
-        total_sla_embb += sum(info["SLA_embb"])
-        total_sla_urllc += sum(info["SLA_urllc"])
-        total_jain += sum(info["Jain Index"])
-        total_util += sum(info["util"])
+        # Xử lý kết quả
+        results["frame"].append(frame_idx)
+        results["decision_time_ms"].append(decision_time)
+        results["throughput"] += info["eMBB_thr"]
+        results["SLA_eMBB"] += info["SLA_embb"]
+        results["SLA_URLLC"] += info["SLA_urllc"]
+        results["utilPower"] += info["utilPower"]
+        results["stability"] += info["stability"]
+        results["utilPRB"] += info["utilPRB"]
 
-        results = {
-            "frame": frame_idx,
-            "decision_time_ms": decisions,
-            "throughput": info["eMBB_thr"],
-            "SLA_eMBB": info["SLA_embb"],
-            "SLA_URLLC": info["SLA_urllc"],
-            "Jain_Index": info["Jain Index"],
-            "stability": info["stability"],
-            "utility": info["util"]
-        }
-
-        #results.append({
-        #    "frame": frame_idx,
-        #    "decision_time_ms": decision_time * 1000,
-        #    "throughput": info["eMBB_thr"],
-        #    "SLA_eMBB": info["SLA_embb"],
-        #    "SLA_URLLC": info["SLA_urllc"],
-        #    "Jain_Index": info["Jain Index"],
-        #    "stability": info["stability"],
-        #    "utility": info["util"]
-        #})
     pAlloc, xAlloc = frame_env.returnAlloc()
 
     # ===== Tổng hợp chỉ số trung bình =====
     metrics = {
-        "avg_decision_time_ms": total_decision_time / (num_frames * 1000 * frame_slots),
-        "avg_throughput": total_thr / (num_frames * frame_slots),
-        "avg_SLA_eMBB": total_sla_embb / (num_frames * frame_slots),
-        "avg_SLA_URLLC": total_sla_urllc / (num_frames * frame_slots),
-        "avg_Jain_Index": total_jain / (num_frames * frame_slots),
-        "avg_stab": total_jain / (num_frames * frame_slots),
-        "avg_util": total_util / (num_frames * frame_slots)
+        "avg_decision_time_ms": np.average(results["decision_time_ms"]),
+        "avg_throughput": np.average(results["throughput"]),
+        "avg_SLA_eMBB": np.average(results["SLA_eMBB"]),
+        "avg_SLA_URLLC": np.average(results["SLA_URLLC"]),
+        "avg_util_power": np.average(results["utilPower"]),
+        "avg_stab": np.average(results["stability"]),
+        "avg_util_PRB": np.average(results["utilPRB"])
     }
 
     print("\n=== KẾT QUẢ ĐÁNH GIÁ TRUNG BÌNH ===")

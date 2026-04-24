@@ -1,2 +1,2 @@
-num_RUs,num_slices,num_URLLC,num_PRB_per_RU,Pmax_mW,avg_thr_cp,avg_sla_embb_cp,avg_sla_urllc_cp,avg_fairness_cp,util_cp,time_cp,avg_thr_ml,avg_sla_embb_ml,avg_sla_urllc_ml,avg_fairness_ml,avg_stab_ml,util_ml,time_ml
-2,10,5,50,100.0,112.521,1.0,0.02,0.483,0.73,0.607,65.491,0.602,1.0,0.492,0.492,0.906,0.0
+num_RUs,num_slices,num_URLLC,num_PRB_per_RU,Pmax_mW,avg_thr_ml,avg_sla_embb_ml,avg_sla_urllc_ml,avg_power_ml,util_ml,avg_thr_flat,avg_sla_embb_flat,avg_sla_urllc_flat,avg_power_flat,util_flat
+

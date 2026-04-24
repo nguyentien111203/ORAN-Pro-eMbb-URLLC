@@ -8,7 +8,7 @@ def plot_DQNtraining_curves(DQN_rewards_log, RU_index, num_slices, num_urllc):
     plt.xlabel("Episode")
     plt.ylabel("Reward")
     plt.grid(True)
-    plt.savefig(rf"./Figures/DQN_RU_{RU_index}_{num_slices}_{num_urllc}")
+    plt.savefig(rf"./Figures/DQN/DQN_RU_{RU_index}_{num_slices}_{num_urllc}")
 
 # Plot after training
 def plot_DQNlosstraining_curves(DQN_loss_log, RU_index, num_slices, num_urllc):
@@ -18,4 +18,4 @@ def plot_DQNlosstraining_curves(DQN_loss_log, RU_index, num_slices, num_urllc):
     plt.xlabel("Episode")
     plt.ylabel("Reward")
     plt.grid(True)
-    plt.savefig(rf"./Figures/DQN_RUloss_{RU_index}_{num_slices}_{num_urllc}")
+    plt.savefig(rf"./Figures/DQN/DQN_RUloss_{RU_index}_{num_slices}_{num_urllc}")

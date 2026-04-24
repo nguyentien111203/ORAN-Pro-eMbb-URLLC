@@ -1,5 +1,7 @@
 import pandas as pd
 import json
+import numpy as np
+import os
 
 
 def load_system_config(csv_path, line):
@@ -32,3 +34,32 @@ def load_cons_from_json(json_path):
         cons = json.load(f)
 
     return cons
+
+
+def save_gain_matrix(gain_matrix, paras):
+    """
+    Lưu ma trận gain vào file .npy.
+    
+    gain_matrix: numpy array hoặc list of lists
+    paras : các tham số đặc trưng
+    filepath: đường dẫn file .npy
+    """
+    numRU, num_slices, num_urllc = paras
+    filepath = f"./Gain/Gain_{numRU}_{num_slices}_{num_urllc}.npy"
+    gain_matrix = np.array(gain_matrix)
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    np.save(filepath, gain_matrix)
+
+
+def load_gain_matrix(paras):
+    """
+    Load ma trận gain từ file .npy.
+
+    Return: numpy array
+    """
+    numRU, num_slices, num_urllc = paras
+    filepath = f"./Gain/Gain_{numRU}_{num_slices}_{num_urllc}.npy"
+    gain_matrix = np.load(filepath)
+
+    return gain_matrix
+

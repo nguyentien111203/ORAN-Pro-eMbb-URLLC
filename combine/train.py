@@ -14,7 +14,8 @@ from combine.utils.plotDQN import plot_DQNtraining_curves, plot_DQNlosstraining_
 from combine.utils.pltSAC import plot_SACtraining_curves, plot_SACactorlosstraining_curves, plot_SACcriticlosstraining_curves
 
 
-def build_pipeline(RUs, slices, num_urllc, H, T_slot, w_reward, T_max, sla_slices, frame_slots,
+def build_pipeline(RUs, slices, num_urllc, H, gain_ru_ru, dist_ue_ru,
+                   T_slot, w_reward, T_max, NF, sla_slices, frame_slots,
                    max_steps, gamma, learning_rate, eps_DQN,
                    device='cpu', allocation_mode = "proportional"):
     """
@@ -24,8 +25,8 @@ def build_pipeline(RUs, slices, num_urllc, H, T_slot, w_reward, T_max, sla_slice
     slot_envs = []
     dqn_agents = []
     for r in range(len(RUs)):
-        env = SlotEnv(RU_index=r, RU=RUs[r], slices=slices, num_urllc=num_urllc, H=H[r][0],
-                      T_slot=T_slot, T_max=T_max, w_reward=w_reward, 
+        env = SlotEnv(RU_index=r, RU=RUs[r], slices=slices, num_urllc=num_urllc, H=H[r][0], gain_ru=gain_ru_ru[r],
+                      dist_ru_ue=dist_ue_ru[r], T_slot=T_slot, T_max=T_max, NF=NF, w_reward=w_reward, 
                       eps=eps_DQN, max_steps=max_steps)
         slot_envs.append(env)
 
@@ -38,7 +39,8 @@ def build_pipeline(RUs, slices, num_urllc, H, T_slot, w_reward, T_max, sla_slice
         dqn_agents.append(agent)
 
     # Frame env and SAC agent
-    frame_env = FrameEnv(slot_envs=slot_envs, slices=slices, num_urllc=num_urllc, H=H, T_max=T_max, w_reward=w_reward, 
+    frame_env = FrameEnv(slot_envs=slot_envs, slices=slices, num_urllc=num_urllc, H=H, gain_ru_ru=gain_ru_ru, 
+                         T_max=T_max, w_reward=w_reward, 
                          sla_slices=sla_slices, frame_slots=frame_slots, allocation_mode=allocation_mode)
     sac_agent = SACAgent(num_RU=len(RUs), state_dim=frame_env.state_dim, num_slices=len(slices), 
                          action_scale=0.495, action_bias=0.505, device=device)
@@ -46,7 +48,8 @@ def build_pipeline(RUs, slices, num_urllc, H, T_slot, w_reward, T_max, sla_slice
     return slot_envs, dqn_agents, frame_env, sac_agent
 
 
-def alternating_training(RUs, slices, num_urllc, H, T_slot, w_reward, T_max, frame_slots, sla_slices,
+def alternating_training(RUs, slices, num_urllc, H, gain_ru_ru, dist_ue_ru,
+                         T_slot, w_reward, T_max, NF, frame_slots, sla_slices,
                          max_steps, gamma, learning_rate, eps_DQN,
                          dqn_pretrain_episodes=1000, dqn_episode_steps=10,
                          sac_train_episodes=200, alt_rounds=1, device='cpu', allocation_mode = "equal"):
@@ -54,7 +57,8 @@ def alternating_training(RUs, slices, num_urllc, H, T_slot, w_reward, T_max, fra
     Hàm thực hiện train mô hình và lưu
     """
     slot_envs, dqn_agents, frame_env, sac_agent = build_pipeline(
-        RUs, slices, num_urllc, H, T_slot, w_reward, T_max, sla_slices, frame_slots,
+        RUs, slices, num_urllc, H, gain_ru_ru, dist_ue_ru,
+        T_slot, w_reward, T_max, NF, sla_slices, frame_slots,
         max_steps, gamma, learning_rate, eps_DQN,
         device, allocation_mode
     )
@@ -88,7 +92,8 @@ def evaluate_full_system(frame_env, sac_agent, num_frames=50, eval_mode=True):
     total_thr = 0.0
     total_sla_embb = 0.0
     total_sla_urllc = 0.0
-    total_fair = 0.0
+    total_utilPower = 0.0
+    total_utilPRB = 0.0
     total_stab = 0.0
 
     state = frame_env.reset()
@@ -99,7 +104,8 @@ def evaluate_full_system(frame_env, sac_agent, num_frames=50, eval_mode=True):
         total_thr += sum(info.get("eMBB_thr", 0.0))
         total_sla_embb += sum(info.get("SLA_embb", 0.0))
         total_sla_urllc += sum(info.get("SLA_urllc", 0.0))
-        total_fair += sum(info.get("Jain Index", 0.0))
+        total_utilPower += sum(info.get("utilPower", 0.0))
+        total_utilPRB += sum(info.get("utilPRB", 0.0))
         total_stab += sum(info.get("stability", 0.0))
 
     results = {
@@ -107,13 +113,14 @@ def evaluate_full_system(frame_env, sac_agent, num_frames=50, eval_mode=True):
         "avg_throughput": total_thr / (num_frames*frame_env.frame_slots),
         "avg_SLA_embb": total_sla_embb / (num_frames*frame_env.frame_slots),
         "avg_SLA_urllc": total_sla_urllc / (num_frames*frame_env.frame_slots),
-        "avg_fairness": total_fair / (num_frames*frame_env.frame_slots),
+        "avg_utilPower": total_utilPower / (num_frames*frame_env.frame_slots),
+        "avg_utilPRB": total_utilPRB / (num_frames*frame_env.frame_slots),
         "avg_stability": total_stab / (num_frames*frame_env.frame_slots)
     }
     return results
 
 
-def createModel(config, consta, trainCons, RUs, slices, H):
+def createModel(config, consta, trainCons, RUs, slices, H, gain_ru_ru, dist_ue_ru):
     """
     Tạo ra model SAC và DQN
     Trả về đường dẫn tới mô hình
@@ -122,7 +129,8 @@ def createModel(config, consta, trainCons, RUs, slices, H):
     print(" Bắt đầu huấn luyện pipeline SAC + DQN...")
     slot_envs, dqn_agents, frame_env, sac_agent, logs, sac_model_path, dqn_model_paths = alternating_training(
         RUs=RUs, slices=slices, num_urllc=config["num_URLLC"], H=H,
-        T_slot=consta["T_slot"], w_reward=consta["w_reward"], T_max=consta["T_max_Mbps"],
+        gain_ru_ru=gain_ru_ru, dist_ue_ru=dist_ue_ru,
+        T_slot=consta["T_slot"], w_reward=consta["w_reward"], T_max=consta["T_max_Mbps"], NF = consta["NF_dB"],
         frame_slots=consta["num_slot_per_frame"], sla_slices=consta["sla_slices"], max_steps=100,
         gamma=trainCons["forSAC"]["gamma"], learning_rate=trainCons["forDQN"]["learning_rate"], 
         eps_DQN=trainCons["forDQN"]["eps_DQN"],
@@ -138,13 +146,13 @@ def createModel(config, consta, trainCons, RUs, slices, H):
     eval_results = evaluate_full_system(frame_env, sac_agent, num_frames=30)
     print("\n Kết quả đánh giá:")
     for k, v in eval_results.items():
-        print(f"{k:>20s}: {v:.4f}")
+        print(f"{k}: {v}")
 
     # --- Vẽ biểu đồ ---
     print("\n Đang vẽ biểu đồ huấn luyện...")
-    plot_SACtraining_curves(logs["sac_rewards"], len(slices), config["num_URLLC"])
-    plot_SACactorlosstraining_curves(logs["actor_loss"], len(slices), config["num_URLLC"])
-    plot_SACcriticlosstraining_curves(logs["critic_loss"], len(slices), config["num_URLLC"])
+    plot_SACtraining_curves(logs["sac_rewards"], len(RUs), len(slices), config["num_URLLC"])
+    plot_SACactorlosstraining_curves(logs["actor_loss"], len(RUs), len(slices), config["num_URLLC"])
+    plot_SACcriticlosstraining_curves(logs["critic_loss"], len(RUs), len(slices), config["num_URLLC"])
     for r in range(config["num_RUs"]):
         plot_DQNtraining_curves(logs["dqn_rewards"][r], r, len(slices), config["num_URLLC"])
         plot_DQNlosstraining_curves(logs["dqn_loss"][r], r, len(slices), config["num_URLLC"])
