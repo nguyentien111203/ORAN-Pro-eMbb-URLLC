@@ -8,7 +8,7 @@ from combine.common.common import MLP
 from scipy.special import ndtri, lambertw # cho hàm Q^-1, Lambert
 
 
-class SlotEnv(gym.Env):
+class RU_eMBB_Env(gym.Env):
     """
     Slot-level environment cho từng RU.
     - Mức này tương tác trực tiếp với DQN agent.
@@ -16,34 +16,21 @@ class SlotEnv(gym.Env):
     - Có thể nhận quota power từ SAC thông qua FrameEnv.
     """
 
-    def __init__(self, RU_index, RU, slices, num_urllc, H, gain_ru, dist_ru_ue, T_slot, T_max, NF,
-                 eps=0.1, max_steps=20, w_reward=None):
-        super(SlotEnv, self).__init__()
+    def __init__(self, RU, slices, num_urllc, H, inter_RU, w_reward, cost_switch, cost_gb, scale_max):
+        super(self).__init__()
 
-        self.RU_index = RU_index
         self.RU = RU
         self.slices = slices
         self.num_urllc = num_urllc
         self.H = H  # channel gains 
-        self.gain_ru = gain_ru
-        self.dist_ru_ue = dist_ru_ue
-        self.T_slot = T_slot
-        self.T_max = T_max
-        self.NF = 10**(NF/10)
-        self.eps = eps
-        self.max_steps = max_steps
-
+        self.inter_RU = inter_RU
+        self.cost_switch = cost_switch
+        self.cost_gb = cost_gb
+        self.scale_max = scale_max
         # Reward weights (merge all weights)
-        self.w_reward = w_reward or {"thr": 0.6, "sla": 0.25, "fair": 0.1, "stab": 0.05}
+        self.w_reward = w_reward 
 
-        # Power allocation info
-        self.power_budget = np.ones(len(self.slices)) / len(self.slices)  # normalized init
-        self.Pmax = RU.Pmax
-        self.P_ru = np.zeros(len(gain_ru))
-        self.effFactor = 0.5
-        # State and action spaces
-        self.num_PRB = RU.K
-        self.num_slices = len(slices)
+
         self.state_dim = self.num_PRB + self.num_slices + 2  # channel avg, traffic, etc. adjustable
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.state_dim,), dtype=np.float32)
         self.action_space = spaces.MultiDiscrete([self.num_slices] * self.num_PRB)

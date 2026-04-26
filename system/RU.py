@@ -1,7 +1,5 @@
-import torch
-
 class BandwidthPart:
-    def __init__(self, num_prb, bw_factor, time_factor, base_bw, base_time, p_each_PRB):
+    def __init__(self, num_prb, band_index, base_bw, base_time, p_each_PRB):
         """
         num_prb: số PRB trong BWP
         bw_factor: hệ số nhân băng thông so với base_bw
@@ -9,8 +7,8 @@ class BandwidthPart:
         p_each_PRB: công suất mỗi PRB ở BWP này
         """
         self.num_prb = num_prb
-        self.bandwidth = bw_factor * base_bw
-        self.time = time_factor * base_time
+        self.bandwidth = (2**band_index) * base_bw
+        self.time = (1/(2**band_index)) * base_time
         self.p_each_PRB = p_each_PRB
 
 class RadioUnit:

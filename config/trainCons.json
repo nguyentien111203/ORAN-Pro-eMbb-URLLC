@@ -1,10 +1,7 @@
 {
     "forDQN" : {
-        "max_steps" : 1,
         "eps_DQN": 0.05,
-        "learning_rate" : 3e-4,
-        "dqn_pretrain_episodes" : 10,
-        "dqn_episode_steps" : 10
+        "learning_rate" : 3e-4
     },
 
     "forSAC" : {
@@ -12,5 +9,5 @@
         "sac_train_episodes": 200
     },
 
-    "alt_round": 1
+    "alt_round": 1 
 }

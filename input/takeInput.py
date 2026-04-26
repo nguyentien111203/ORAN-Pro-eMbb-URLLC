@@ -7,19 +7,21 @@ import os
 def load_system_config(csv_path, line):
     """
     Đọc thông tin cấu hình hệ thống từ CSV
-    Returns dictionary of parameters
+    csv_path : đường dẫn tới file câu hình csv
+    line : cấu hình thứ bao nhiêu
     """
     cfg = pd.read_csv(csv_path).iloc[line-1]
 
     config = {
-        "num_RUs": int(cfg["num_RUs"]),
-        "num_slices": int(cfg["num_slices"]),
-        "num_URLLC": int(cfg["num_URLLC"]),
-        "num_PRB_per_RU": int(cfg["num_PRB_per_RU"]),
-        "Pmax_mW": float(cfg["Pmax_mW"]),
-        "deadline": int(cfg["deadline"]),
-        "load_URLLC": float(cfg["load_URLLC"]),
-        "dataRate_eMBB_Mbps": float(cfg["dataRate_eMBB_Mbps"])
+        "num_RUs" : cfg["num_RUs"],
+        "num_slices" : cfg["num_slices"],
+        "ue_URLLC" : cfg["ue_URLLC"],
+        "ue_eMBB" : cfg["ue_eMBB"],
+        "bwp_index" : cfg["bwp_index"],
+        "p_bwp_mW" : cfg["p_bwp_mW"],
+        "Rmin" : cfg["Rmin"],
+        "Pac" : cfg["Pac"],
+        "Lat" : cfg["Lat"]
     }
 
     return config

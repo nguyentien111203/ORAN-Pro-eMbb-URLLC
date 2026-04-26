@@ -5,27 +5,7 @@ import torch
 from collections import deque
 
 
-def evaluate_greedy(agent, env, n_eval=5):
-    prev_eps = agent.eps
-    agent.eps = 0.0  # Greedy evaluation
-    returns = []
-
-    for _ in range(n_eval):
-        state = env.reset()
-        done = False
-        total_reward = 0
-        while not done:
-            action = agent.select_action(state)
-            next_state, reward, done, _ = env.step(action)
-            total_reward += reward
-            state = next_state
-        returns.append(total_reward)
-
-    agent.eps = prev_eps
-    return np.mean(returns), np.std(returns)
-
-
-def train_dqn(env, agent, num_episodes=2000, log_interval=10, eval_interval=10):
+def train_dqn_embb(env, agent, num_episodes=2000, log_interval=10, eval_interval=10):
     """
     Huấn luyện DQN với đánh giá greedy định kỳ (không plot trong hàm này)
     """

@@ -4,7 +4,7 @@ from tqdm import trange
 import torch
 from collections import deque
 
-def train_dqn(env, agent, num_episodes=2000, log_interval=10):
+def train_dqn_urllc(env, agent, num_episodes=2000, log_interval=10):
     """
     Huấn luyện DQN với đánh giá greedy định kỳ (không plot trong hàm này)
     """

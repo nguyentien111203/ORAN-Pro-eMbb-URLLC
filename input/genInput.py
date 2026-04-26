@@ -1,15 +1,57 @@
-from system.RU import RadioUnits
-from system.slices import URLLCSlice, eMBBslice
+from system.RU import RadioUnit, BandwidthPart
+from system.slices import BaseSlice, eMBBUE, URLLCUE
 import numpy as np
+import yaml
 from input.genTopo import generate_topology, calDistance, plot_topology
 
-def generateRUs(num_RUs, K, B, n, N0, P_max):
-    set_RU = []
-    for i in range(num_RUs):
-        RUi = RadioUnits(K, B, n, N0, P_max)
-        set_RU.append(RUi)
-    
-    return set_RU
+def genRU(RU_path):
+    """
+    Tạo tập các RU
+    str RU_path: đường dẫn file cấu hình (yaml) 
+    """
+    with open(RU_path, "r", encoding="utf-8") as f:
+        ru_cfg = yaml.safe_load(f)["ru"]
+    ru_list = []
+    for r in ru_cfg:
+        bwps = [BandwidthPart(**b) for b in r["bwps"]]
+        ru_list.append(RadioUnit(id=r["id"], location=r.get("location",""), bwps=bwps))
+    return ru_list
+
+
+def load_slices_and_ues(slice_path: str, ue_path: str):
+    """
+    Load file slice_path và ue_path để lấy ra thông tin slice và ue
+    """
+    with open(slice_path, "r", encoding="utf-8") as f:
+        slices_cfg = yaml.safe_load(f)["slices"]
+    with open(ue_path, "r", encoding="utf-8") as f:
+        ues_cfg = yaml.safe_load(f)["ues"]
+
+    # Tạo UE object theo type
+    ue_dict = {}
+    for u in ues_cfg:
+        if u["serv"].upper() == "URLLC":
+            ue_obj = URLLCUE(serv=u["serv"], id=u["id"], slice=u["slice"],
+                             lat=u["lat"], pac=u["pac"])
+        elif u["serv"].upper() == "EMBB":
+            ue_obj = eMBBUE(serv=u["serv"], id=u["id"], slice=u["slice"],
+                            thr=u["thr"])
+        else:
+            raise ValueError(f"Unknown UE type: {u['serv']}")
+        ue_dict[u["id"]] = ue_obj
+
+    # Ghép UE vào slice
+    slice_list = []
+    for s in slices_cfg:
+        ue_set = [ue_dict[uid] for uid in s["ue_list"]]
+        slice_obj = BaseSlice(id=s["id"], type=s["type"], ue_set=ue_set)
+        slice_list.append(slice_obj)
+
+    # Phân loại slice theo type
+    embb_slices = [s for s in slice_list if s.type.upper() == "EMBB"]
+    urllc_slices = [s for s in slice_list if s.type.upper() == "URLLC"]
+
+    return embb_slices, urllc_slices
 
 
 def generate_channel_gain(R, frame_slot, I, K, model="rayleigh", K_factor=5, seed=None):
@@ -95,26 +137,52 @@ def generate_channel_gain(R, frame_slot, I, K, model="rayleigh", K_factor=5, see
     return H, gain_ru_ru, dist_ue_ru
 
 
-def generate_pipeline_inputs(num_RUs, num_slices, num_URLLC, numPRB, B, n, N0, frame_slot, 
-                             P_max, deadline, load, dataRate):
+def generate_pipeline_inputs(RU_path, slice_path, ue_path):
     """
-    Sinh dữ liệu đầu vào cho pipeline (RU, slices, channel gain, ...).
-    Có thể thay thế sau này bằng đọc từ file .json.
+    Tạo RU và các slice từ các đường dẫn
     """
     # --- Tạo RUs ---
-    RUs = []
-    for _ in range(num_RUs):
-        RUs.append(RadioUnits(K=numPRB, B=B, n=n, N0=N0, Pmax=P_max))
+    ru_list = genRU(RU_path)
 
     # --- Tạo slices ---
-    slices = []
-    for i in range(num_slices):
-        if i < num_URLLC:  # phần đầu là URLLC
-            slices.append(URLLCSlice(D=np.random.randint(1,4), L=load, eps=1e-4, eps_phy=1e-5))
-        else:  # cuối cùng là eMBB
-            slices.append(eMBBslice(dataRate=dataRate))
+    eMBBlist, URLLClist = load_slices_and_ues(slice_path, ue_path)
 
-    # --- Tạo channel gain matrix ---
-    H, gain_ru_ru, dist_ue_ru = generate_channel_gain(num_RUs, frame_slot, num_slices, numPRB)
+    return ru_list, eMBBlist, URLLClist
 
-    return RUs, slices, H, gain_ru_ru, dist_ue_ru
+
+def calculateScaleMax(RUs, embb_slices, urllc_slices, cost_switch, cost_gb):
+    """
+    Hàm tính toán giá trị scale cho các thành phần
+    """
+    num_slices = len(embb_slices) + len(urllc_slices)
+    # Throughput tối đa
+    maxThr = 0
+    for s in embb_slices:
+        maxThr += sum(s.ue_set[e].thr for e in range(len(s.ue_set)))
+
+    # Latency tối đa
+    maxlat = 0
+    for s in urllc_slices:
+        maxlat += sum(s.ue_set[u].lat for u in range(len(s.ue_set)))
+
+    # Chi phí về năng lượng tiêu hao max, phân mảnh PRB và switching giữa các BWP
+    cEneMax = 0
+    cFrag = 0
+    cSwitch = 0
+    cGuardB = 0
+    for r in RUs:
+        cFrag += r.B_r
+        maxIndex = np.max(r.bwps[b].index for b in range(len(r.bwps)))
+        minIndex = np.max(r.bwps[b].index for b in range(len(r.bwps)))
+        gapIndex = maxIndex - minIndex
+        for b in r.bwps:
+            cEneMax += b.num_prb * b.p_each_PRB * b.time
+            cSwitch += cost_switch * num_slices
+            cGuardB +=  gapIndex * num_slices
+    cFrag = cFrag**2
+
+    scaleMax = (maxThr, maxlat, cEneMax, cFrag, cSwitch, cGuardB)
+
+    return scaleMax
+
+    

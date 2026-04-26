@@ -1,56 +1,27 @@
-from subprob.solve import bigProblems
-from input.takeInput import load_system_config, load_cons_from_json, save_gain_matrix, load_gain_matrix
-from input.genInput import generate_pipeline_inputs
-from baseline.flatDRL.FrameEnv import FrameEnv
-from combine.train import createModel 
-from combine.allocate import run_oran_allocation_pipeline
-from output.printOutput import write_results_to_csv, plot_and_save_metrics
-from baseline.runbaseline import runAndEval
-import matplotlib.pyplot as plt
-import torch
+from input.takeInput import load_cons_from_json, save_gain_matrix, load_gain_matrix
+from input.genInput import generate_pipeline_inputs, generate_channel_gain, calculateScaleMax
+from combine.train import alternating_training, buildEnvAgent
 from tqdm import trange
 
 def main():
-    # --- Lấy đầu vào ---
-    config = load_system_config(csv_path=r"./config/config.csv", line=1)
-
+    # --- Lấy các hằng số đầu vào ---
     consta = load_cons_from_json(json_path=r"./config/cons.json")
     
     trainCons = load_cons_from_json(json_path=r"./config/trainCons.json")
     # --- Tạo input ---
-    RUs, slices, H, gain_ru_ru, dist_ue_ru = generate_pipeline_inputs(num_RUs=config["num_RUs"], num_slices=config["num_slices"], 
-                                            num_URLLC=config["num_URLLC"], numPRB=config["num_PRB_per_RU"],
-                                            B=consta["B_MHz"], n=consta["n"], N0=consta["N0_mW_per_MHz"], 
-                                            frame_slot=consta["num_slot_per_frame"],
-                                            P_max=config["Pmax_mW"], deadline=config["deadline"],
-                                            load=config["load_URLLC"], dataRate=config["dataRate_eMBB_Mbps"])
+    RUs, embb_slices, urllc_slices = generate_pipeline_inputs(RU_path=r"./config/RU.yaml", slice_path=r"./config/slice.yaml",
+                                                              ue_path=r"./config/ue.yaml")
     
-    print("H shape:", H.shape)
-    print("H min:", H.min())
-    print("H max:", H.max())
-    print("H mean:", H.mean())
-
-    save_gain_matrix(H, (config["num_RUs"], config["num_slices"], config["num_URLLC"]))
-    #sac_model_path, dqn_model_paths = createModel(config, consta, trainCons, RUs, slices, H, gain_ru_ru, dist_ue_ru)
-
-    # --- Giải bài toán với cvxpy --- 
-    #print(" Giải bài toán với cvxpy")
-    #H = load_gain_matrix((config["num_RUs"], config["num_slices"], config["num_URLLC"]))
-
-    #problem = bigProblems(RUs=RUs, slices=slices, K=config["num_PRB_per_RU"], H=H, T_slot=consta["T_slot"], num_slot=consta["num_slot_per_frame"],
-    #                      w_reward=consta["w_reward"], T_max=consta["T_max_Mbps"], sla_slices=consta["sla_slices"])
+    scale_max = calculateScaleMax(RUs, embb_slices, urllc_slices, consta["cost_switch"], consta["cost_gb"])
     
-    #solvetime, longcheck, shortcheck, Probmetrics = problem.solveTwoProblem()
+    H = generate_channel_gain()
 
+    embb_envs, urllc_envs, embb_dqn_agents, urllc_dqn_agents, frame_env, sac_agent = buildEnvAgent(
+        RUs, embb_slices, urllc_slices, H, consta["inter_RU"], consta["w_reward"], consta["cost_switch"],
+        consta["cost_gb"], scale_max)
 
-    #metrics, results, pAlloc, xAlloc = run_oran_allocation_pipeline(sac_model_path, dqn_model_paths, slices,
-    #                                        RUs, H, gain_ru_ru, dist_ue_ru, T_max=consta["T_max_Mbps"], NF=consta["NF_dB"], 
-    #                                        w_reward=consta["w_reward"], 
-    #                                        sla_slices=consta["sla_slices"], num_urllc=config["num_URLLC"],
-    #                                        frame_slots=consta["num_slot_per_frame"], num_frames=1)
-    
-    #resultsF = runAndEval(
-    #    RUs, slices, H, gain_ru_ru, dist_ue_ru, config, consta)
+    sac_model_path, dqn_model_paths = alternating_training(embb_envs, urllc_envs, embb_dqn_agents, urllc_dqn_agents, frame_env, sac_agent)
+
     
     #header = ["num_RUs", "num_slices", "num_URLLC", "num_PRB_per_RU", "Pmax_mW",
     #        "avg_thr_ml", "avg_sla_embb_ml", "avg_sla_urllc_ml", "avg_power_ml", "util_ml",

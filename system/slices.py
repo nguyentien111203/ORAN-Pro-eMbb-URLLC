@@ -43,8 +43,9 @@ class BaseSlice:
     Quản lý buffer, tốc độ đến, throughput, và cập nhật dữ liệu.
     """
 
-    def __init__(self, name, ue_set):
-        self.name = name
+    def __init__(self, id, type, ue_set):
+        self.id = id
+        self.type = type
         self.ue_set = ue_set
 
 
