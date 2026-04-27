@@ -97,16 +97,7 @@ def train_sac(env, agent, num_episodes=300, log_interval=10, update_per_step=1, 
 
         avg_rewards.append(moving_avg_reward)
 
-        # === In log theo tiến độ ===
-        if (ep + 1) % log_interval == 0 or ep == 0:
-            print(f"[SAC Ep {ep+1:4d}] "
-                f"Reward={total_reward:.3f} | "
-                f"Reward(avg {window_size})={moving_avg_reward:.3f} | "
-                f"ActorLoss={moving_avg_actor:.5f} | "
-                f"CriticLoss={moving_avg_critic:.5f}")
-
     # Sau khi train xong
-    print(" SAC training complete.")
     sac_model_path = f"./combine/SAC/model/sac_model_{env.num_rus}_{env.num_slices}_{env.num_urllc}.pth"
     torch.save({
         'actor': agent.actor.state_dict(),

@@ -4,7 +4,7 @@ from tqdm import trange
 import torch
 from collections import deque
 
-def train_dqn_urllc(env, agent, num_episodes=2000, log_interval=10):
+def train_dqn_urllc(env, agent, num_episodes):
     """
     Huấn luyện DQN với đánh giá greedy định kỳ (không plot trong hàm này)
     """
@@ -51,15 +51,6 @@ def train_dqn_urllc(env, agent, num_episodes=2000, log_interval=10):
         # Trung bình trượt (trên 10 ep gần nhất)
         moving_avg = np.mean(reward_window)
         avg_rewards.append(moving_avg)
-
-        # --- In tiến trình ---
-        if (ep + 1) % 10 == 0 or ep == 0:
-            print(f"[Episode {ep+1:4d}] Avg Reward (last {window_size}) = {moving_avg:.3f}, "
-                f"Last Reward = {total_reward:.3f}, Avg Loss = {avg_loss:.5f}, Eps = {agent.eps:.3f}")
-
-        # Logging
-        if (ep + 1) % log_interval == 0:
-            print(f"[Ep {ep+1:4d}] Reward = {total_reward:.3f}, Avg Loss = {avg_loss:.4f}, eps = {agent.eps:.3f}")
 
     return avg_rewards, losses, dqn_model_path
 

@@ -5,7 +5,7 @@ import torch
 from collections import deque
 
 
-def train_dqn_embb(env, agent, num_episodes=2000, log_interval=10, eval_interval=10):
+def train_dqn_embb(env, agent, num_episodes):
     """
     Huấn luyện DQN với đánh giá greedy định kỳ (không plot trong hàm này)
     """
@@ -54,73 +54,8 @@ def train_dqn_embb(env, agent, num_episodes=2000, log_interval=10, eval_interval
         moving_avg = np.mean(reward_window)
         avg_rewards.append(moving_avg)
 
-        # --- In tiến trình ---
-        if (ep + 1) % 10 == 0 or ep == 0:
-            print(f"[Episode {ep+1:4d}] Avg Reward (last {window_size}) = {moving_avg:.3f}, "
-                f"Last Reward = {total_reward:.3f}, Avg Loss = {avg_loss:.5f}, Eps = {agent.eps:.3f}")
-
-        # Logging
-        if (ep + 1) % log_interval == 0:
-            print(f"[Ep {ep+1:4d}] Reward = {total_reward:.3f}, Avg Loss = {avg_loss:.4f}, eps = {agent.eps:.3f}")
-
-        # === Đánh giá greedy định kỳ ===
-        if (ep + 1) % eval_interval == 0:
-            eval_mean, eval_std = evaluate_greedy(agent, env, n_eval=5)
-            print(f"[Eval @Ep {ep+1}] Greedy Reward = {eval_mean:.3f} ± {eval_std:.3f}")
-
-            # Lưu best model
-            if eval_mean > best_eval:
-                torch.save(agent.policy_net.state_dict(), dqn_model_path)
-                best_eval = eval_mean
-
-    print(f"✅ Training finished. Best greedy reward = {best_eval:.3f}")
     return avg_rewards, losses, dqn_model_path
 
 
-def evaluate_dqn_agents(slot_envs, dqn_agents, num_episodes=10):
-    """
-    Đánh giá tất cả DQN agents (slot-level) sau khi train.
-    """
-    results = []
-
-    for r, env in enumerate(slot_envs):
-        agent = dqn_agents[r]
-        total_reward = 0.0
-        total_thr = 0.0
-        total_sla = 0.0
-        total_fair = 0.0
-        episodes_done = 0
-
-        for ep in range(num_episodes):
-            state = env.reset()
-            done = False
-            while not done:
-                action = agent.select_action(state, eval_mode=True)
-                next_state, reward, done, info = env.step(action)
-
-                total_reward += reward
-                total_thr += info.get("eMBB_thr", 0)
-                total_sla += info.get("SLA", 0)
-                total_fair += info.get("JainIndex", 0)
-                state = next_state
-
-                done = info.get("done", False)
-
-            episodes_done += 1
-
-        results.append({
-            "RU": r,
-            "avg_reward": total_reward / max(1, episodes_done),
-            "avg_thr": total_thr / max(1, episodes_done),
-            "avg_sla": total_sla / max(1, episodes_done),
-            "avg_fair": total_fair / max(1, episodes_done),
-        })
-
-    print("\n[DQN Evaluation Results]")
-    for res in results:
-        print(f"RU {res['RU']:2d}: Reward={res['avg_reward']:.3f} | "
-              f"Thr={res['avg_thr']:.3f} | SLA={res['avg_sla']:.3f} | Fair={res['avg_fair']:.3f}")
-
-    return results
 
 

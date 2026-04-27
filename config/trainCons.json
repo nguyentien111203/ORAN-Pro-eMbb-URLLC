@@ -1,13 +1,27 @@
 {
     "forDQN" : {
         "eps_DQN": 0.05,
-        "learning_rate" : 3e-4
+        "learning_rate" : 3e-4,
+        "device" : "cpu",
+        "lr" : 1e-3,
+        "gamma" : 0.99,
+        "batch_size" : 32,
+        "eps_start" : 1.0,
+        "eps_end" : 0.1,
+        "eps_decay" : 0.7
     },
 
     "forSAC" : {
+        "action_scale" : 1.0, 
+        "action_bias" : 0.0,
+        "device" : "cpu",
         "gamma" : 0.99,
-        "sac_train_episodes": 200
-    },
-
-    "alt_round": 1 
+        "sac_train_episodes": 200,
+        "lr" : 3e-4, 
+        "tau" : 0.005, 
+        "alpha" : 0.01,
+        "actor_lr" : 5e-5,         
+        "critic_lr" : 1e-5,
+        "alpha_lr" : 3e-4
+    }
 }

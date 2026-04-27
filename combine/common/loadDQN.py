@@ -1,5 +1,5 @@
 import torch
-from combine.DQN.multiagent_DQN import MultiHeadDQN
+from combine.common.multiagent_DQN import MultiHeadDQN
 
 def load_dqn_agent(model_path, state_dim, num_PRB, num_slices, device="cpu"):
     """

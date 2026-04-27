@@ -13,7 +13,7 @@ from combine.DQN_URLLC.train import train_dqn_urllc
 from combine.SAC.train_SAC import train_sac
 
 
-def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, w_reward, cost_switch, cost_gb, scale_max):
+def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, w_reward, cost_switch, cost_gb, scale_max, train_cons):
     """
     Dựng các môi trường và agent cho SAC và DQN
     set of Radio Unit RUs : tập các RU
@@ -25,6 +25,7 @@ def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, w_reward, cost_sw
     cost_switch : hệ số chi phí chuyển BWP
     cost_gb : hệ số guard band
     scale_max : các giá trị scale theo từng thành phần trong scale_max
+    train_cons : hằng số trong training mô hình
 
     giá trị trả về :
     embb_envs, urllc_envs : tập các môi trường cho embb và urllc ở từng RU
@@ -45,8 +46,8 @@ def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, w_reward, cost_sw
         urllc_env = RU_URLLC_Env(RUs[r], urllc_slices, len(urllc_slices), H, inter_RU, w_reward, cost_switch, cost_gb, scale_max)
         embb_env = RU_eMBB_Env(RUs[r], embb_slices, len(embb_slices), H, inter_RU, w_reward, cost_switch, cost_gb, scale_max)
 
-        urllc_agent = MultiHeadDQNAgent(num_urllc=len(urllc_slices), num_urllc_ue=num_urllc_ue, num_bwp=len(RUs[r].bwps))
-        embb_agent = MultiHeadDQNAgent(num_urllc=len(embb_slices), num_urllc_ue=num_embb_ue, num_bwp=len(RUs[r].bwps))
+        urllc_agent = MultiHeadDQNAgent(1, len(urllc_slices), num_urllc_ue, len(RUs[r].bwps), train_cons["forDQN"])
+        embb_agent = MultiHeadDQNAgent(1, len(embb_slices), num_embb_ue, len(RUs[r].bwps), train_cons["forDQN"])
 
         embb_envs.append(embb_env)
         urllc_envs.append(urllc_env)
@@ -55,8 +56,8 @@ def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, w_reward, cost_sw
 
     # Frame env và SAC agent
     num_bwp_ru = [len(RUs[r].bwps) for r in range(len(RUs))]
-    frame_env = FrameEnv(urllc_envs, embb_envs, urllc_slices, embb_slices, H, inter_RU, w_reward, cost_switch, cost_gb)
-    sac_agent = SACAgent(num_rus=len(RUs), num_bwp_ru=num_bwp_ru, num_slices = len(urllc_slices) + len(embb_slices))
+    frame_env = FrameEnv(urllc_envs, embb_envs, urllc_slices, embb_slices, H, w_reward)
+    sac_agent = SACAgent(1, len(RUs), num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"])
 
     return embb_envs, urllc_envs, embb_dqn_agents, urllc_dqn_agents, frame_env, sac_agent
 

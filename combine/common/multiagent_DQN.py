@@ -63,27 +63,20 @@ class MultiHeadDQNAgent:
         num_urllc,
         num_urllc_ue,
         num_bwp,
-        device="cpu",
-        lr=1e-3,
-        gamma=0.99,
-        batch_size=32,
-        eps_start=1.0,
-        eps_end=0.1,
-        eps_decay=0.7,
-        target_update=10,
+        train_cons,
         buffer_capacity=10000,
     ):
-        self.device = torch.device(device)
+        self.device = torch.device(train_cons["device"])
         self.state_dim = state_dim
         self.num_urllc = num_urllc
         self.num_urllc_ue = num_urllc_ue
         self.num_bwp = num_bwp
-        self.gamma = gamma
-        self.batch_size = batch_size
-        self.eps = eps_start
-        self.eps_end = eps_end
-        self.eps_decay = eps_decay
-        self.target_update = target_update
+        self.gamma = train_cons["gamma"]
+        self.batch_size = train_cons["batch_size"]
+        self.eps = train_cons["eps_start"]
+        self.eps_end = train_cons["eps_end"]
+        self.eps_decay = train_cons["eps_decay"]
+        self.lr = train_cons["lr"]
         self.learn_step = 0
 
         # Mạng Q chính & target (dùng cùng cấu hình)
@@ -99,10 +92,11 @@ class MultiHeadDQNAgent:
         self.target_net.eval()
 
         # Optimizer
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.lr)
 
         # Replay buffer
         self.replay_buffer = ReplayBuffer(forSAC=False, capacity=buffer_capacity)
+
 
     def select_action(self, state):
         """Chọn hành động theo epsilon-greedy"""
@@ -117,6 +111,7 @@ class MultiHeadDQNAgent:
                 q_values_per_slice = self.policy_net(state)
                 actions = [q.argmax(dim=-1).item() for q in q_values_per_slice]
         return actions
+
 
     def update_epsilon(self):
         """Giảm epsilon theo decay"""

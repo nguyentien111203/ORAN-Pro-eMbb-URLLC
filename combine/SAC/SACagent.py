@@ -6,8 +6,7 @@ from combine.common.common import MLP, GaussianPolicy, ReplayBuffer
 
 
 class SACAgent:
-    def __init__(self, state_dim, num_rus, num_bwp_ru, num_slices, action_scale=1.0, action_bias=0.0,
-                 device='cpu', lr=3e-4, gamma=0.99, tau=0.005, alpha=0.01):
+    def __init__(self, state_dim, num_rus, num_bwp_ru, num_slices, train_cons):
         """
         Agent cho SAC
         int state_dim : số chiều của state
@@ -20,12 +19,16 @@ class SACAgent:
         self.num_rus = num_rus
         self.num_bwp_ru = num_bwp_ru
         self.num_slices = num_slices    
-        self.device = device
-        self.gamma = gamma
-        self.tau = tau
-        self.alpha = alpha
-        self.action_scale = action_scale
-        self.action_bias = action_bias
+        self.device = train_cons["device"]
+        self.gamma = train_cons["gamma"]
+        self.tau = train_cons["tau"]
+        self.alpha = train_cons["alpha"]
+        self.action_scale = train_cons["action_scale"]
+        self.action_bias = train_cons["action_bias"]
+        self.lr = train_cons["lr"]
+        self.actor_lr = train_cons["actor_lr"]
+        self.critic_lr = train_cons["critic_lr"]
+        self.alpha_lr = train_cons["alpha_lr"]
 
         self.action_dim = np.sum(num_bwp_ru) * num_slices
 
@@ -49,15 +52,9 @@ class SACAgent:
         self.target_critic_1.load_state_dict(self.critic_1.state_dict())
         self.target_critic_2.load_state_dict(self.critic_2.state_dict())
 
-        # --- Optimizers (use explicit sensible LR defaults)
-        # prefer explicit lr per optimizer rather than fractions of lr
-        actor_lr = lr/6         # tuneable; 1e-4 is stable default
-        critic_lr = lr/30        # slightly lower to avoid critic explosion
-        alpha_lr = lr         # for log_alpha optimizer
-
-        self.actor_opt = optim.Adam(self.actor.parameters(), lr=actor_lr)
-        self.critic_1_opt = optim.Adam(self.critic_1.parameters(), lr=critic_lr)
-        self.critic_2_opt = optim.Adam(self.critic_2.parameters(), lr=critic_lr)
+        self.actor_opt = optim.Adam(self.actor.parameters(), lr=self.actor_lr)
+        self.critic_1_opt = optim.Adam(self.critic_1.parameters(), lr=self.critic_lr)
+        self.critic_2_opt = optim.Adam(self.critic_2.parameters(), lr=self.critic_lr)
 
         # --- Replay buffer (same as before)
         self.replay_buffer = ReplayBuffer(forSAC=True)
@@ -74,21 +71,18 @@ class SACAgent:
         self.alpha = float(self.log_alpha.exp().item())
 
         # optimizer for log_alpha
-        self.alpha_opt = optim.Adam([self.log_alpha], lr=alpha_lr)
+        self.alpha_opt = optim.Adam([self.log_alpha], lr=self.alpha_lr)
 
-    def select_action(self, state, eval_mode=False):
+
+    def select_action(self, state):
 
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
 
-        if eval_mode:
-            with torch.no_grad():
-                mean, _ = self.actor.forward(state)
-                action = mean
-                action = action.detach().cpu().numpy()[0]
-        else:
-            action, log_prob, _ = self.actor.sample(state)
+        with torch.no_grad():
+            mean, _ = self.actor.forward(state)
+            action = mean
             action = action.detach().cpu().numpy()[0]
-
+       
         action = action.reshape(self.action_shape)
 
         # Softmax per RU
@@ -98,6 +92,7 @@ class SACAgent:
             action[r] = exp_row / (np.sum(exp_row) + 1e-9)
 
         return action
+
 
     def update(self, step, policy_delay, last_actor_loss, batch_size, debug=False):
         """
