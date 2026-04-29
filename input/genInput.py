@@ -155,15 +155,6 @@ def calculateScaleMax(RUs, embb_slices, urllc_slices, cost_switch, cost_gb):
     Hàm tính toán giá trị scale cho các thành phần
     """
     num_slices = len(embb_slices) + len(urllc_slices)
-    # Throughput tối đa
-    maxThr = 0
-    for s in embb_slices:
-        maxThr += sum(s.ue_set[e].thr for e in range(len(s.ue_set)))
-
-    # Latency tối đa
-    maxlat = 0
-    for s in urllc_slices:
-        maxlat += sum(s.ue_set[u].lat for u in range(len(s.ue_set)))
 
     # Chi phí về năng lượng tiêu hao max, phân mảnh PRB và switching giữa các BWP
     cEneMax = 0
@@ -171,17 +162,17 @@ def calculateScaleMax(RUs, embb_slices, urllc_slices, cost_switch, cost_gb):
     cSwitch = 0
     cGuardB = 0
     for r in RUs:
-        cFrag += r.B_r
+        cFrag += len(r.bwps)
         maxIndex = np.max(r.bwps[b].index for b in range(len(r.bwps)))
         minIndex = np.max(r.bwps[b].index for b in range(len(r.bwps)))
         gapIndex = maxIndex - minIndex
         for b in r.bwps:
             cEneMax += b.num_prb * b.p_each_PRB * b.time
             cSwitch += cost_switch * num_slices
-            cGuardB +=  gapIndex * num_slices
+            cGuardB += cost_gb * gapIndex * num_slices
     cFrag = cFrag**2
 
-    scaleMax = (maxThr, maxlat, cEneMax, cFrag, cSwitch, cGuardB)
+    scaleMax = [cEneMax, cFrag, cSwitch, cGuardB]
 
     return scaleMax
 

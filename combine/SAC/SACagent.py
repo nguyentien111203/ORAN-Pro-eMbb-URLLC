@@ -74,22 +74,37 @@ class SACAgent:
         self.alpha_opt = optim.Adam([self.log_alpha], lr=self.alpha_lr)
 
 
-    def select_action(self, state):
-
+    def select_action(self, state, last_action, beta=0.2):
+        """
+        beta: hệ số smoothing (0: không smooth, gần 1: rất smooth)
+        """
+        # 1. Chuẩn bị state
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
 
+        # 2. Forward qua Actor (SAC thường output mean và log_std)
         with torch.no_grad():
+            # Ở chế độ inference (select_action), ta thường lấy mean và áp dụng tanh 
+            # để giới hạn về [-1, 1] trước khi map sang xác suất
             mean, _ = self.actor.forward(state)
-            action = mean
-            action = action.detach().cpu().numpy()[0]
-       
-        action = action.reshape(self.action_shape)
+            raw_action = torch.tanh(mean).cpu().numpy()[0]
+        
+        # 3. Reshape về cấu hình [R, B, S] 
+        # R: số RU, B: số BWP mỗi RU, S: số Slice
+        action = raw_action.reshape(self.action_shape)
 
-        # Softmax per RU
-        for r in range(action.shape[0]):
-            row = action[r]
-            exp_row = np.exp(row - np.max(row))
-            action[r] = exp_row / (np.sum(exp_row) + 1e-9)
+        # 4. Softmax per BWP của từng RU
+        # Đảm bảo tổng tỷ lệ PRB của các Slice (s) trên mỗi BWP (b) tại mỗi RU (r) là 1.0
+        for r in range(action.shape[0]):      # Duyệt qua từng RU
+            for b in range(action.shape[1]):  # Duyệt qua từng BWP
+                slice_weights = action[r, b]
+                # Softmax ổn định số học
+                exp_weights = np.exp(slice_weights - np.max(slice_weights))
+                action[r, b] = exp_weights / (np.sum(exp_weights) + 1e-9)
+
+        # 5. Action Smoothing (Nỗ lực ổn định SAC)
+        # Giúp giảm chi phí chuyển đổi C_s và giữ môi trường ổn định cho các DQN tầng dưới
+        if last_action is not None:
+            action = (1 - beta) * action + beta * last_action
 
         return action
 

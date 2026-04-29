@@ -37,10 +37,20 @@ class RU_URLLC_Env(gym.Env):
         self.cost_gb = cost_gb
         self.scale_max = scale_max
 
-        # State và action (cái này từ từ mới code)
-        self.state_dim = self.num_PRB + self.num_slices + 2  # channel avg, traffic, etc. adjustable
-        self.observation_space = spaces.Box(low=0, high=1, shape=(self.state_dim,), dtype=np.float32)
-        self.action_space = spaces.MultiDiscrete([self.num_slices] * self.num_PRB)
+        # Số PRB phân cho mỗi slice, đây cũng là thông tin trao đổi từ SAC về DQN của URLLC 
+        self.PRB_slice = [[0 for b in range(len(self.RU.bwps))] for _ in range(self.num_urllc)]
+        self.last_PRB_slice = [[0 for b in range(len(self.RU.bwps))] for _ in range(self.num_urllc)]
+
+        # State và action 
+        self.num_urllc_ue = [len(self.slices[s].ue_set) for s in range(len(self.num_urllc))]
+        self.state_dim = self.num_urllc_ue + 4 + 1  # [QoS_ratios, 4_costs, psi]
+        self.observation_space = spaces.Box(
+            low=0, 
+            high=np.inf, # Ratios có thể lớn hơn 1
+            shape=(self.state_dim,), 
+            dtype=np.float32
+        )
+        self.action_space = spaces.MultiDiscrete([self.num_urllc_ue] * max(self.PRB_slice))
 
         # Tính toán số bit mà các UE nhận được
         self.numBit = [[0 for _ in range(len(self.slices[slice_index].ue_set))] for slice_index in range(self.num_urllc)]  
@@ -57,15 +67,12 @@ class RU_URLLC_Env(gym.Env):
         self.init_numBit = [[0 for _ in range(len(self.slices[slice_index].ue_set))] for slice_index in range(self.num_urllc)]
         self.index_subframe = 0 # index của subframe đang xét hiện tại
 
-        # Số PRB phân cho mỗi slice, đây cũng là thông tin trao đổi từ SAC về DQN của URLLC 
-        self.PRB_slice = [[0 for b in range(len(self.RU.bwps))] for _ in range(self.num_urllc)]
-
         # Ma trận thể hiện slice URLLC có sử dụng BWP không, các giá trị là 0,1
         self.BWP_slice = [[0 for b in range(len(self.RU.bwps))] for _ in range(self.num_urllc)]
         self.last_BWP_slice = [[0 for b in range(len(self.RU.bwps))] for _ in range(self.num_urllc)]
 
-        # DQN agent, (cái này chưa xét vội)
-        self.dqn_agent = MultiHeadDQNAgent(self.state_dim, )
+        # DQN agent của RU với URLLC
+        self.dqn_urllc_agent = MultiHeadDQNAgent(self.state_dim, self.num_urllc, self.num_urllc_ue, len(self.RU.bwps))
 
 
     def assign_dqn_agent(self, agent):
@@ -80,11 +87,13 @@ class RU_URLLC_Env(gym.Env):
         self.H = Hnew
 
 
-    def get_state(self):
+    def get_state(self, urllc_rate, cEne, cFrag, cSwit, cGB):
         """
         Tạo ma trận state cho DQN URLLC (để sau)
         """
-
+        state = np.concatenate([urllc_rate, cEne / self.scale_max[2], cFrag / self.scale_max[3],
+                                cSwit / self.scale_max[4], cGB / self.scale_max[5]])
+         
         return state.astype(np.float32)
 
 
@@ -132,21 +141,25 @@ class RU_URLLC_Env(gym.Env):
         cFrag = self.calculateFrag()
         cSwit = self.calculateSwitch()
         cGB = self.calculateGuardBand()
+        stab = self.calculateStab()
 
-        # Tính toán penalty
-        penalty = sum(self.URLLC_Latency[s][u] - self.slices[s].ue_set[u].lat 
-                      for s in range(len(self.num_urllc)) for u in range(len(self.slices[s].ue_set)))
+        # Tính toán các tỷ lệ được phục vụ
+        urllc_rate = [[0 for _ in range(len(self.slices[slice_index].ue_set))] for slice_index in range(self.num_urllc)]
+        for s in range(self.num_urllc):
+            for u in range(len(self.slices[s].ue_set)):
+                urllc_rate[s][u] = self.URLLC_Latency[s][u] / self.slices[s].ue_set[u].lat
 
-        reward = (self.w_reward["lat"] * sum(self.URLLC_Latency) / self.scale_max[1]) + \
-                self.w_reward["cost"] * ((cEne / self.scale_max[2]) + (cFrag / self.scale_max[3]) + \
-                                         (cSwit / self.scale_max[4]) + (cGB / self.scale_max[5])) + \
-                self.w_reward["penal"] * penalty
+        reward = self.w_reward["lat"] * sum(1 - urllc_rate[s][u] for slice_index in range(self.num_urllc) 
+                                             for _ in range(len(self.slices[slice_index].ue_set))) + \
+                self.w_reward["cost"] * (4 - (cEne / self.scale_max[2]) - (cFrag / self.scale_max[3]) - \
+                                         (cSwit / self.scale_max[4]) - (cGB / self.scale_max[5])) + stab
 
         # Kiểm tra xem đã sang frame mới chưa
         done = self.index_subframe > 9
 
-        # Đưa ra state tiếp theo
+        # Đưa ra state tiếp theo và action tiếp
         next_state = self.get_state()
+        self.last_PRB_slice = self.PRB_slice
 
         # Thông tin các thứ
         info = {
@@ -250,12 +263,41 @@ class RU_URLLC_Env(gym.Env):
         return urllc_guard
 
 
+    def calculateStab(self):
+        """
+        Tính toán chỉ số biến động Psi(t) theo phân bổ.
+        
+        Args:
+            current_allocations (np.ndarray): Mảng phân bổ PRB hiện tại y(t), 
+                                            shape: (num_slices, num_ues_per_slice, num_bwps)
+            last_allocations (np.ndarray): Mảng phân bổ PRB ở subframe trước y(t-1)
+            
+        Returns:
+            float: Chỉ số Psi(t) trong khoảng (exp(-1), 1]
+        """
+        # Nếu là subframe đầu tiên, chưa có lịch sử thì coi như ổn định tuyệt đối
+        if self.last_PRB_slice is None:
+            return 1.0
+        
+        # Tính tổng số thay đổi 
+        changes = np.not_equal(self.PRB_slice, self.last_PRB_slice)
+        total_changes = np.sum(changes)
+        
+        # Tính tổng không gian quyết định 
+        total_elements = self.last_PRB_slice.__sizeof__()
+        
+        # Tính tỷ lệ biến động
+        variation_ratio = total_changes / (total_elements + 1e-9)
+        
+        # 4. Áp dụng hàm exp(-x)[cite: 2]
+        psi = np.exp(-variation_ratio)
+        
+        return float(psi)
+
+
     def returnAlloc(self):
         """
         Hàm trả về phân bổ PRB cho từng UE trong slice
         """
         return self.alloc
 
-"""
-Khi có state, action và reward hoàn thiện của DQN URLLC thì sẽ xem xem còn thiếu gì thì bổ sung nhé
-"""
