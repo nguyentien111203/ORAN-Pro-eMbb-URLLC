@@ -1,0 +1,9 @@
+slices:
+  - id: slice_urllc_0
+    type: "URLLC"
+    ue_set: "[ue_0, ue_1]" # Lấy là tập id của các UE
+    
+
+  - id: slice_urllc_1
+    type: "URLLC"
+    ue_set: "[ue_2]"

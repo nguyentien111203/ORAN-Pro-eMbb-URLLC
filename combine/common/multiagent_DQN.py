@@ -98,19 +98,52 @@ class MultiHeadDQNAgent:
         self.replay_buffer = ReplayBuffer(forSAC=False, capacity=buffer_capacity)
 
 
-    def select_action(self, state):
-        """Chọn hành động theo epsilon-greedy"""
-        if np.random.rand() < self.eps:
-            # random hành động cho mỗi slice
-            actions = [
-                np.random.randint(ue) for ue in self.num_urllc_ue
-            ]
-        else:
-            with torch.no_grad():
-                state = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
-                q_values_per_slice = self.policy_net(state)
-                actions = [q.argmax(dim=-1).item() for q in q_values_per_slice]
-        return actions
+    def select_action(self, state, BWP_slice):
+        """
+        Phân bổ UE cho các PRB của RU hiện tại dựa trên ngân sách từng slice.
+        BWP_slice: list chứa số lượng PRB cho từng slice [s0, s1, ...].
+        self.num_urllc_ue: list chứa số UE của từng slice [num_ue_s0, num_ue_s1, ...].
+        """
+        all_allocations = {}
+        
+        # 1. Chuẩn bị state và lấy Q-values từ mạng Neural
+        state_t = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        
+        with torch.no_grad():
+            # q_values shape: [total_max_prbs, max_ues_per_slice]
+            # Hoặc một cấu hình phù hợp với số UE lớn nhất bạn quản lý
+            q_values = self.policy_net(state_t).squeeze(0).cpu().numpy()
+
+        prb_offset = 0 # Điểm bắt đầu dải PRB của slice hiện tại[cite: 2]
+        
+        # 2. Duyệt qua từng slice dựa trên số lượng slice URLLC[cite: 2]
+        for s_idx, budget in enumerate(BWP_slice):
+            budget = int(budget)
+            if budget <= 0:
+                all_allocations[s_idx] = np.array([])
+                continue
+                
+            # Lấy số lượng UE mà slice s phục vụ[cite: 2]
+            num_ues = self.num_urllc_ue[s_idx]
+
+            # 3. Thực hiện Epsilon-Greedy để chọn UE cho từng PRB[cite: 2]
+            if np.random.rand() < self.eps:
+                # Chọn ngẫu nhiên index UE từ 0 đến num_ues-1[cite: 2]
+                selected_ues = np.random.randint(0, num_ues, size=budget)
+            else:
+                # Lấy đoạn Q-values tương ứng với ngân sách PRB của slice s[cite: 2]
+                # và giới hạn không gian hành động theo số UE của slice đó (Masking)[cite: 2]
+                slice_q_segment = q_values[prb_offset : prb_offset + budget, :num_ues]
+                
+                # Chọn UE có index mang lại Q-value lớn nhất[cite: 2]
+                selected_ues = np.argmax(slice_q_segment, axis=-1)
+
+            all_allocations[s_idx] = selected_ues
+            
+            # 4. Cập nhật offset để slice tiếp theo nhận đoạn PRB kế tiếp[cite: 2]
+            prb_offset += budget
+
+        return all_allocations
 
 
     def update_epsilon(self):

@@ -24,8 +24,8 @@ class RU_URLLC_Env(gym.Env):
     scale_max : các giá trị scale cho từng thành phần trong reward
     """
 
-    def __init__(self, RU, slices, num_urllc, H, inter_RU, inter_factor, w_reward, cost_switch, cost_gb, scale_max):
-        super(self).__init__()
+    def __init__(self, RU, slices, num_urllc, H, inter_RU, inter_factor, w_reward, cost_switch, cost_gb, scale_max, trainCons):
+        super().__init__()
         self.RU = RU
         self.slices = slices
         self.num_urllc = num_urllc
@@ -36,21 +36,22 @@ class RU_URLLC_Env(gym.Env):
         self.cost_switch = cost_switch
         self.cost_gb = cost_gb
         self.scale_max = scale_max
+        self.trainCons = trainCons
 
         # Số PRB phân cho mỗi slice, đây cũng là thông tin trao đổi từ SAC về DQN của URLLC 
         self.PRB_slice = [[0 for b in range(len(self.RU.bwps))] for _ in range(self.num_urllc)]
         self.last_PRB_slice = [[0 for b in range(len(self.RU.bwps))] for _ in range(self.num_urllc)]
 
         # State và action 
-        self.num_urllc_ue = [len(self.slices[s].ue_set) for s in range(len(self.num_urllc))]
-        self.state_dim = self.num_urllc_ue + 4 + 1  # [QoS_ratios, 4_costs, psi]
+        self.num_urllc_ue = [len(self.slices[s].ue_set) for s in range(self.num_urllc)]
+        self.state_dim = sum(self.num_urllc_ue) + 4 + 1  # [QoS_ratios, 4_costs, psi]
         self.observation_space = spaces.Box(
             low=0, 
             high=np.inf, # Ratios có thể lớn hơn 1
             shape=(self.state_dim,), 
             dtype=np.float32
         )
-        self.action_space = spaces.MultiDiscrete([self.num_urllc_ue] * max(self.PRB_slice))
+        self.action_space = spaces.MultiDiscrete(max(self.num_urllc_ue) * self.RU.B_r)
 
         # Tính toán số bit mà các UE nhận được
         self.numBit = [[0 for _ in range(len(self.slices[slice_index].ue_set))] for slice_index in range(self.num_urllc)]  
@@ -59,10 +60,10 @@ class RU_URLLC_Env(gym.Env):
         self.URLLC_Latency = [[0 for _ in range(len(self.slices[slice_index].ue_set))] for slice_index in range(self.num_urllc)]  
         
         # List các số PRB của từng BWP phân bổ cho các UE
-        self.alloc = [[[0 for u in range(len(self.slices[i].ue_set))] for b in range(len(self.RU.bwps))] for i in range(len(self.num_urllc))]
+        self.alloc = [[[0 for u in range(len(self.slices[i].ue_set))] for b in range(len(self.RU.bwps))] for i in range(self.num_urllc)]
 
         # Tỷ lệ SINR của từng UE với từng PRB của từng BWP
-        self.snr = [[[0 for u in range(len(self.slices[i].ue_set))] for b in range(len(self.RU.bwps))] for i in range(len(self.num_urllc))]
+        self.snr = [[[0 for u in range(len(self.slices[i].ue_set))] for b in range(len(self.RU.bwps))] for i in range(self.num_urllc)]
         
         self.init_numBit = [[0 for _ in range(len(self.slices[slice_index].ue_set))] for slice_index in range(self.num_urllc)]
         self.index_subframe = 0 # index của subframe đang xét hiện tại
@@ -72,7 +73,11 @@ class RU_URLLC_Env(gym.Env):
         self.last_BWP_slice = [[0 for b in range(len(self.RU.bwps))] for _ in range(self.num_urllc)]
 
         # DQN agent của RU với URLLC
-        self.dqn_urllc_agent = MultiHeadDQNAgent(self.state_dim, self.num_urllc, self.num_urllc_ue, len(self.RU.bwps))
+        self.dqn_urllc_agent = MultiHeadDQNAgent(self.state_dim, self.num_urllc, self.num_urllc_ue, len(self.RU.bwps),
+                                                 trainCons)
+
+        # State của DQN URLLC hiện tại
+        self.state = []
 
 
     def assign_dqn_agent(self, agent):
@@ -97,10 +102,10 @@ class RU_URLLC_Env(gym.Env):
         return state.astype(np.float32)
 
 
-    def select_action(self, state):
+    def select_action(self):
         """Nếu có DQN agent thì dùng policy của nó, nếu không thì random."""
         if self.dqn_urllc_agent is not None:
-            return self.dqn_urllc_agent.select_action(state)
+            return self.dqn_urllc_agent.select_action(self.state, self.BWP_slice)
         return self.action_space.sample()
 
 

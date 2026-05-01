@@ -20,8 +20,8 @@ class eMBBUE(UE):
     Lớp các UE có dịch vụ eMBB
     float thr : Throughput tối thiểu mà UE yêu cầu
     """
-    def __init__(self, serv, id, slice, thr):
-        super().__init__(serv, id, slice)
+    def __init__(self, id, slice, thr):
+        super().__init__("eMBB", id, slice)
         self.thr = thr
 
 
@@ -31,8 +31,8 @@ class URLLCUE(UE):
     float lat : latency tối đa mà UE yêu cầu
     float pac : packet size của UE
     """
-    def __init__(self, serv, id, slice, lat, pac):
-        super().__init__(serv, id, slice)
+    def __init__(self, id, slice, lat, pac):
+        super().__init__("URLLC", id, slice)
         self.lat = lat
         self.pac = pac
 

@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import trange
-import torch
 from collections import deque
 
 def train_dqn_urllc(env, agent, num_episodes):

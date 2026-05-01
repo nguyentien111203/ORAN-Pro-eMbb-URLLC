@@ -4,54 +4,109 @@ import numpy as np
 import yaml
 from input.genTopo import generate_topology, calDistance, plot_topology
 
-def genRU(RU_path):
+
+def genRU(RU_path, BASE_BW, BASE_TIME):
     """
-    Tạo tập các RU
-    str RU_path: đường dẫn file cấu hình (yaml) 
+    Tạo tập các RU từ file cấu hình YAML.
+    - RU_path: Đường dẫn file cấu hình các RU.
+    - BASE_BW: Băng thông cơ bản mỗi PRB
+    - BASE_TIME: time slot cơ bản mỗi PRB
+    - N0: Mật độ phổ nhiễu (hằng số chung).
     """
     with open(RU_path, "r", encoding="utf-8") as f:
-        ru_cfg = yaml.safe_load(f)["ru"]
+        # Load đúng key "rus" từ file YAML của bạn
+        ru_cfg = yaml.safe_load(f)["rus"] 
+    
     ru_list = []
     for r in ru_cfg:
-        bwps = [BandwidthPart(**b) for b in r["bwps"]]
-        ru_list.append(RadioUnit(id=r["id"], location=r.get("location",""), bwps=bwps))
+        bwps_obj = []
+        for b in r["bwps"]:
+            # Khởi tạo BWP với các tham số từ YAML và hằng số hệ thống
+            # Lưu ý: "num_prb" hoặc "range" tùy thuộc vào cách bạn gọi trong YAML
+            num_prbs = b.get("num_prb","unknown")
+            
+            bwp = BandwidthPart(
+                id=b["id"],
+                num_prb=num_prbs,
+                band_index=b.get("bandindex"),
+                p_each_PRB=b["p_each_PRB"],
+                base_bw=BASE_BW,
+                base_time=BASE_TIME
+            )
+            bwps_obj.append(bwp)
+        
+        # Tạo RadioUnit
+        # Sử dụng r.get("Ru_index") để khớp với "Ru_index: ru_0" trong YAML của bạn
+        ru_id = r.get("Ru_index", "unknown")
+        
+        ru_list.append(RadioUnit(Ru_index=ru_id, bwps=bwps_obj))
+        
     return ru_list
 
 
-def load_slices_and_ues(slice_path: str, ue_path: str):
+def genSlices(ue_path, slice_path):
     """
-    Load file slice_path và ue_path để lấy ra thông tin slice và ue
+    Tạo tập các slices eMBB và URLLC riêng biệt.
+    - ue_path: đường dẫn file ue.yaml
+    - slice_path: đường dẫn file slice.yaml
     """
-    with open(slice_path, "r", encoding="utf-8") as f:
-        slices_cfg = yaml.safe_load(f)["slices"]
+    # 1. Load dữ liệu từ YAML
     with open(ue_path, "r", encoding="utf-8") as f:
-        ues_cfg = yaml.safe_load(f)["ues"]
+        ue_data = yaml.safe_load(f)["ues"]
+    
+    with open(slice_path, "r", encoding="utf-8") as f:
+        slice_data = yaml.safe_load(f)["slices"]
 
-    # Tạo UE object theo type
-    ue_dict = {}
-    for u in ues_cfg:
-        if u["serv"].upper() == "URLLC":
-            ue_obj = URLLCUE(serv=u["serv"], id=u["id"], slice=u["slice"],
-                             lat=u["lat"], pac=u["pac"])
-        elif u["serv"].upper() == "EMBB":
-            ue_obj = eMBBUE(serv=u["serv"], id=u["id"], slice=u["slice"],
-                            thr=u["thr"])
+    # Tạo map để lưu các đối tượng Slice theo ID
+    slice_dict = {}
+    urllc_slices = []
+    embb_slices = []
+
+    # 2. Khởi tạo các đối tượng Slice trước
+    for s_cfg in slice_data:
+        s_id = s_cfg["id"]
+        s_type = s_cfg["type"]
+        
+        # Tạo object Slice (giả sử lớp Slice của bạn nhận các tham số này)
+        # Khởi tạo ue_set rỗng để lấp đầy sau
+        new_slice = BaseSlice(
+            id=s_id,
+            type=s_type,
+            ue_set=[] 
+        )
+        
+        slice_dict[s_id] = new_slice
+        
+        # Tách nhóm ngay từ đầu
+        if s_type.upper() == "URLLC":
+            urllc_slices.append(new_slice)
         else:
-            raise ValueError(f"Unknown UE type: {u['serv']}")
-        ue_dict[u["id"]] = ue_obj
+            embb_slices.append(new_slice)
 
-    # Ghép UE vào slice
-    slice_list = []
-    for s in slices_cfg:
-        ue_set = [ue_dict[uid] for uid in s["ue_list"]]
-        slice_obj = BaseSlice(id=s["id"], type=s["type"], ue_set=ue_set)
-        slice_list.append(slice_obj)
+    # 3. Gán UE vào đúng Slice dựa trên slice_id
+    for u_cfg in ue_data:
+        s_id = u_cfg["slice_id"]
+        if s_id in slice_dict:
+            target_slice = slice_dict[s_id]
+            
+            # Kiểm tra type của slice để khởi tạo đúng Class UE
+            if target_slice.type.upper() == "URLLC":
+                new_ue = URLLCUE(
+                    id=u_cfg["id"],
+                    slice=s_id,
+                    lat=u_cfg.get("lat"),
+                    pac=u_cfg.get("pac")
+                )
+            else:
+                new_ue = eMBBUE(
+                    id=u_cfg["id"],
+                    slice=s_id,
+                    thr=u_cfg.get("thr")
+                )
+            # Thêm UE vào danh sách ue_set của Slice tương ứng
+            slice_dict[s_id].ue_set.append(new_ue)
 
-    # Phân loại slice theo type
-    embb_slices = [s for s in slice_list if s.type.upper() == "EMBB"]
-    urllc_slices = [s for s in slice_list if s.type.upper() == "URLLC"]
-
-    return embb_slices, urllc_slices
+    return urllc_slices, embb_slices
 
 
 def generate_channel_gain(R, frame_slot, I, K, model="rayleigh", K_factor=5, seed=None):
@@ -137,17 +192,28 @@ def generate_channel_gain(R, frame_slot, I, K, model="rayleigh", K_factor=5, see
     return H, gain_ru_ru, dist_ue_ru
 
 
-def generate_pipeline_inputs(RU_path, slice_path, ue_path):
+def generate_pipeline_inputs(RU_path, slice_path, ue_path, consta):
     """
     Tạo RU và các slice từ các đường dẫn
+    str RU_path: đường dẫn tới cấu hình các RU
+    str slice_path: đường dẫn tới cấu hình các slice
+    str ue_path: đường dẫn tới cấu hình các ue
+    consta: các hằng số chung của hệ thống
+
+    return:
+        ru_list, eMBBlist, URLLClist: danh sách các RU, eMBB và URLLC slice
+        num_urllc_ue, num_embb_ue: danh sách số lượng UE các slice
     """
     # --- Tạo RUs ---
-    ru_list = genRU(RU_path)
+    ru_list = genRU(RU_path, consta["BASE_BW_MHz"], consta["BASE_TIME_ms"])
 
     # --- Tạo slices ---
-    eMBBlist, URLLClist = load_slices_and_ues(slice_path, ue_path)
+    eMBBlist, URLLClist = genSlices(ue_path, slice_path)
 
-    return ru_list, eMBBlist, URLLClist
+    num_urllc_ue = [len(URLLClist[s].ue_set) for s in range(len(URLLClist))]
+    num_embb_ue = [len(eMBBlist[s].ue_set) for s in range(len(eMBBlist))]
+
+    return ru_list, eMBBlist, URLLClist, num_urllc_ue, num_embb_ue
 
 
 def calculateScaleMax(RUs, embb_slices, urllc_slices, cost_switch, cost_gb):
@@ -163,8 +229,8 @@ def calculateScaleMax(RUs, embb_slices, urllc_slices, cost_switch, cost_gb):
     cGuardB = 0
     for r in RUs:
         cFrag += len(r.bwps)
-        maxIndex = np.max(r.bwps[b].index for b in range(len(r.bwps)))
-        minIndex = np.max(r.bwps[b].index for b in range(len(r.bwps)))
+        maxIndex = np.argmax(r.bwps[b].index for b in range(len(r.bwps)))
+        minIndex = np.argmin(r.bwps[b].index for b in range(len(r.bwps)))
         gapIndex = maxIndex - minIndex
         for b in r.bwps:
             cEneMax += b.num_prb * b.p_each_PRB * b.time
@@ -176,4 +242,45 @@ def calculateScaleMax(RUs, embb_slices, urllc_slices, cost_switch, cost_gb):
 
     return scaleMax
 
+
+def generate_h_matrix(num_rus, num_slots, num_slices,
+                      num_urllc_ue, num_embb_ue):
+    """
+    Tạo ma trận H [RU][Slot][Slice][UE]
+    - num_urllc_ue: list chứa số UE của từng slice URLLC.
+    - num_embb_ue: list chứa số UE của từng slice eMBB.
+    """
+    # Hợp nhất danh sách số lượng UE của tất cả các slice để dễ lặp
+    all_slice_ue_counts = num_urllc_ue + num_embb_ue #
     
+    H = []
+    for r in range(num_rus):
+        slots_h = []
+        for t in range(num_slots):
+            slices_h = []
+            for s in range(num_slices):
+                num_ues = all_slice_ue_counts[s]
+                
+                # 1. Tạo "khoảng cách" ngẫu nhiên cố định cho UE này (để giữ tính ổn định tương đối)
+                # Giả lập gain nền từ 0.001 đến 0.1
+                base_gain = np.random.uniform(0.001, 0.1, size=num_ues)
+                
+                # 2. Thêm Fading biến động theo từng time slot (Rayleigh Fading)
+                # exponential(1.0) mô phỏng bình phương biên độ Rayleigh
+                fading = np.random.exponential(1.0, size=num_ues)
+                
+                # Gain tổng hợp
+                ue_gains = base_gain * fading
+                slices_h.append(ue_gains)
+                
+            slots_h.append(slices_h)
+        H.append(slots_h)
+        
+    return H
+
+# --- Ví dụ cách bạn tách H để đưa vào DQN từng loại ---
+# H_matrix = generate_h_matrix(...)
+
+# Lấy H cho một RU 'r' tại slot 't':
+# H_urllc = H[r][t][:num_urllc]            # List chứa gain của các slice URLLC
+# H_embb  = H[r][t][num_urllc:num_slices]  # List chứa gain của các slice eMBB

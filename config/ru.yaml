@@ -1,0 +1,11 @@
+rus:
+  - Ru_index: ru_0
+    bwps:
+      - id: bwp_0
+        num_prb: 10
+        bandindex: 1  # numerology 1
+        p_each_PRB: 5 # mW
+      - id: bwp_1
+        num_prb: 10
+        bandindex: 0  # numerology 0
+        p_each_PRB: 5 # mW

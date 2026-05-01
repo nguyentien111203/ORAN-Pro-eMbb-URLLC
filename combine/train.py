@@ -13,7 +13,7 @@ from combine.DQN_URLLC.train import train_dqn_urllc
 from combine.SAC.train_SAC import train_sac
 
 
-def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, w_reward, cost_switch, cost_gb, scale_max, train_cons):
+def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, inter_factor, w_reward, cost_switch, cost_gb, scale_max, train_cons):
     """
     Dựng các môi trường và agent cho SAC và DQN
     set of Radio Unit RUs : tập các RU
@@ -43,15 +43,17 @@ def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, w_reward, cost_sw
 
     for r in range(len(RUs)):
         # Khởi tạo môi trường và agent cho từng loại slice ở từng RU
-        urllc_env = RU_URLLC_Env(RUs[r], urllc_slices, len(urllc_slices), H, inter_RU, w_reward, cost_switch, cost_gb, scale_max)
-        embb_env = RU_eMBB_Env(RUs[r], embb_slices, len(embb_slices), H, inter_RU, w_reward, cost_switch, cost_gb, scale_max)
+        urllc_env = RU_URLLC_Env(RUs[r], urllc_slices, len(urllc_slices), H[r][0][:len(urllc_slices)], 
+                                 inter_RU, inter_factor, w_reward, cost_switch, cost_gb, scale_max, train_cons["forDQN"])
+        #embb_env = RU_eMBB_Env(RUs[r], embb_slices, len(embb_slices), H[r][0][len(urllc_slices):len(urllc_slices)+len(embb_slices)], 
+        #                       inter_RU, inter_factor, w_reward, cost_switch, cost_gb, scale_max, train_cons["forDQN"])
 
         urllc_agent = MultiHeadDQNAgent(1, len(urllc_slices), num_urllc_ue, len(RUs[r].bwps), train_cons["forDQN"])
-        embb_agent = MultiHeadDQNAgent(1, len(embb_slices), num_embb_ue, len(RUs[r].bwps), train_cons["forDQN"])
+        #embb_agent = MultiHeadDQNAgent(1, len(embb_slices), num_embb_ue, len(RUs[r].bwps), train_cons["forDQN"])
 
-        embb_envs.append(embb_env)
+        #embb_envs.append(embb_env)
         urllc_envs.append(urllc_env)
-        embb_dqn_agents.append(embb_agent)
+        #embb_dqn_agents.append(embb_agent)
         urllc_dqn_agents.append(urllc_agent)
 
     # Frame env và SAC agent

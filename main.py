@@ -1,5 +1,5 @@
 from input.takeInput import load_cons_from_json, save_gain_matrix, load_gain_matrix
-from input.genInput import generate_pipeline_inputs, generate_channel_gain, calculateScaleMax
+from input.genInput import generate_pipeline_inputs, generate_channel_gain, calculateScaleMax, generate_h_matrix
 from combine.train import alternating_training, buildEnvAgent
 from tqdm import trange
 
@@ -9,16 +9,18 @@ def main():
     
     trainCons = load_cons_from_json(json_path=r"./config/trainCons.json")
     # --- Tạo input ---
-    RUs, embb_slices, urllc_slices = generate_pipeline_inputs(RU_path=r"./config/RU.yaml", slice_path=r"./config/slice.yaml",
-                                                              ue_path=r"./config/ue.yaml")
+    RUs, embb_slices, urllc_slices, num_urllc_ue, num_embb_ue = generate_pipeline_inputs("./config/ru.yaml", "./config/slice.yaml",
+                                                              "./config/ue.yaml", consta)
     
     scale_max = calculateScaleMax(RUs, embb_slices, urllc_slices, consta["cost_switch"], consta["cost_gb"])
     
-    H = generate_channel_gain()
+    # Tạm để debug
+    H = generate_h_matrix(len(RUs), consta["frame_slots"], len(embb_slices) + len(urllc_slices), 
+                          num_urllc_ue, num_embb_ue)
 
     embb_envs, urllc_envs, embb_dqn_agents, urllc_dqn_agents, frame_env, sac_agent = buildEnvAgent(
-        RUs, embb_slices, urllc_slices, H, consta["inter_RU"], consta["w_reward"], consta["cost_switch"],
-        consta["cost_gb"], scale_max)
+        RUs, embb_slices, urllc_slices, H, consta["inter_RU"], consta["inter_factor"], consta["w_reward"], consta["cost_switch"],
+        consta["cost_gb"], scale_max, trainCons)
 
     sac_model_path, dqn_model_paths = alternating_training(embb_envs, urllc_envs, embb_dqn_agents, urllc_dqn_agents, frame_env, sac_agent)
 
