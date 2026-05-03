@@ -36,7 +36,7 @@ def train_sac(env, agent, num_episodes=300, log_interval=10, update_per_step=1, 
 
     for ep in trange(num_episodes, desc="Training SAC"):
         
-        state = env.reset()
+        state = np.zeros(env.state_dim)
         done = False
         total_reward = 0.0
         actor_loss_sum = 0.0
@@ -45,7 +45,7 @@ def train_sac(env, agent, num_episodes=300, log_interval=10, update_per_step=1, 
         steps = 0
 
         while not done:
-            action = agent.select_action(state)
+            action = agent.select_action(state, env.last_BWP_slice)
             next_state, reward, done, info = env.step(action)
 
             # Save transition

@@ -24,7 +24,8 @@ class RU_URLLC_Env(gym.Env):
     scale_max : các giá trị scale cho từng thành phần trong reward
     """
 
-    def __init__(self, RU, slices, num_urllc, H, inter_RU, inter_factor, w_reward, cost_switch, cost_gb, scale_max, trainCons):
+    def __init__(self, RU, slices, num_urllc, H, inter_RU, inter_factor, N0, w_reward, cost_switch, 
+                 cost_gb, scale_max, trainCons, frame_slots):
         super().__init__()
         self.RU = RU
         self.slices = slices
@@ -32,11 +33,13 @@ class RU_URLLC_Env(gym.Env):
         self.H = H  
         self.inter_RU = inter_RU
         self.inter_factor = inter_factor
+        self.N0 = N0
         self.w_reward = w_reward
         self.cost_switch = cost_switch
         self.cost_gb = cost_gb
         self.scale_max = scale_max
         self.trainCons = trainCons
+        self.frame_slots = frame_slots
 
         # Số PRB phân cho mỗi slice, đây cũng là thông tin trao đổi từ SAC về DQN của URLLC 
         self.PRB_slice = [[0 for b in range(len(self.RU.bwps))] for _ in range(self.num_urllc)]
@@ -73,8 +76,7 @@ class RU_URLLC_Env(gym.Env):
         self.last_BWP_slice = [[0 for b in range(len(self.RU.bwps))] for _ in range(self.num_urllc)]
 
         # DQN agent của RU với URLLC
-        self.dqn_urllc_agent = MultiHeadDQNAgent(self.state_dim, self.num_urllc, self.num_urllc_ue, len(self.RU.bwps),
-                                                 trainCons)
+        self.dqn_urllc_agent = None
 
         # State của DQN URLLC hiện tại
         self.state = []
@@ -82,7 +84,7 @@ class RU_URLLC_Env(gym.Env):
 
     def assign_dqn_agent(self, agent):
         """Gán DQN agent để dùng khi FrameEnv gọi env.select_action()."""
-        self.dqn_agent = agent
+        self.dqn_urllc_agent = agent
 
 
     def update_H(self, Hnew):
@@ -96,8 +98,10 @@ class RU_URLLC_Env(gym.Env):
         """
         Tạo ma trận state cho DQN URLLC (để sau)
         """
-        state = np.concatenate([urllc_rate, cEne / self.scale_max[2], cFrag / self.scale_max[3],
-                                cSwit / self.scale_max[4], cGB / self.scale_max[5]])
+        # Bẻ thẳng urllc_rate
+        flat_urllc_rate = [urllc_rate[i][u] for i in range(len(urllc_rate)) for u in range(len(urllc_rate[i]))]
+        state = np.concatenate([flat_urllc_rate, cEne / self.scale_max[0], cFrag / self.scale_max[1],
+                                cSwit / self.scale_max[2], cGB / self.scale_max[3]])
          
         return state.astype(np.float32)
 
@@ -115,7 +119,6 @@ class RU_URLLC_Env(gym.Env):
         và ghi đè lên các giá trị SINR, latency và số PRB được phân bổ (alloc))
         """
         self.numBit = self.init_numBit
-        return self.get_state()
 
 
     def step(self, action):
@@ -130,10 +133,16 @@ class RU_URLLC_Env(gym.Env):
                done : đã thực hiện xong trong frame chưa để reset lại index_subframe
                info : thông tin về trễ của từng UE urllc trong các slice
         """
-        self.index_subframe += 1
+        if self.index_subframe < self.frame_slots:
+            self.index_subframe += 1
+        else :
+            self.index_subframe = 0
 
+        self.reset() # Reset lại số bit về ban đầu
+        
         # Lưu lại phân bổ số PRB từ action
         self.alloc = action
+        self.transBWPslice()
 
         # Tính toán nhiễu, SINR và trễ khi phân bổ
         interBWP = self.calculateMultiBWPNoise()
@@ -156,14 +165,14 @@ class RU_URLLC_Env(gym.Env):
 
         reward = self.w_reward["lat"] * sum(1 - urllc_rate[s][u] for slice_index in range(self.num_urllc) 
                                              for _ in range(len(self.slices[slice_index].ue_set))) + \
-                self.w_reward["cost"] * (4 - (cEne / self.scale_max[2]) - (cFrag / self.scale_max[3]) - \
-                                         (cSwit / self.scale_max[4]) - (cGB / self.scale_max[5])) + stab
+                self.w_reward["cost"] * (4 - (cEne / self.scale_max[0]) - (cFrag / self.scale_max[1]) - \
+                                         (cSwit / self.scale_max[2]) - (cGB / self.scale_max[3])) + stab
 
         # Kiểm tra xem đã sang frame mới chưa
-        done = self.index_subframe > 9
+        done = self.index_subframe > self.frame_slots
 
         # Đưa ra state tiếp theo và action tiếp
-        next_state = self.get_state()
+        next_state = self.get_state(urllc_rate, cEne, cFrag, cSwit, cGB)
         self.last_PRB_slice = self.PRB_slice
 
         # Thông tin các thứ
@@ -184,10 +193,12 @@ class RU_URLLC_Env(gym.Env):
         """
         interBWP = np.zeros(self.num_urllc)
         for u in range(self.num_urllc):
-            for b in self.RU.bwps:
-                for bk in self.RU.bwps:
-                    if bk != b:
-                        interBWP[u] += self.inter_factor * np.abs(bk - b) * self.RU.bwps[bk].p_each_PRB * self.BWP_slice[bk]
+            for b in range(len(self.RU.bwps)):
+                for bk in range(len(self.RU.bwps)):
+                    if self.RU.bwps[b].band_index != self.RU.bwps[bk].band_index:
+                        gapIndex = np.abs(self.RU.bwps[b].band_index - self.RU.bwps[bk].band_index)
+                        interBWP[u] += self.inter_factor * gapIndex \
+                            * self.RU.bwps[bk].p_each_PRB * self.BWP_slice[bk][u]
         return interBWP
 
 
@@ -195,18 +206,18 @@ class RU_URLLC_Env(gym.Env):
         """
         Tính toán lại tỷ lệ SINR ở từng BWP với từng UE trong RU
         """
-        for i in range(len(self.num_urllc)):
+        for i in range(self.num_urllc):
             for b in range(len(self.RU.bwps)):
                 for u in range(len(self.slices[i].ue_set)): 
-                    self.snr[i][b][u] = (self.RU.bwps[b].p_each_PRB * self.H[self.index_subframe][i][b][u]) \
-                        / (self.RU.bwps[b].bandwidth * self.RU.N0 * (self.interRU + 1) + interBWP[u]) 
+                    self.snr[i][b][u] = (self.RU.bwps[b].p_each_PRB * self.H[i][u]) \
+                        / (self.RU.bwps[b].bandwidth * self.N0 * (self.inter_RU + 1) + interBWP[u]) 
 
 
     def calculateNumBit(self):
         """
         Tính toán số bit mà các UE nhận được
         """
-        for i in range(len(self.num_urllc)):
+        for i in range(self.num_urllc):
             for u in range(len(self.slices[i].ue_set)):
                 for b in range(len(self.RU.bwps)):
                     self.numBit[i][u] += self.RU.bwps[b].time * self.alloc[i][u] * np.log2(1 + self.snr[i][b][u])
@@ -216,7 +227,7 @@ class RU_URLLC_Env(gym.Env):
         """
         Tính toán trễ của từng slice urllc
         """
-        for i in range(len(self.num_urllc)):
+        for i in range(self.num_urllc):
             for u in range(len(self.slices[i].ue_set)):
                 self.URLLC_Latency[i][u] = self.slices[i].ue_set[u].pac / self.numBit[i][u]
 
@@ -226,7 +237,7 @@ class RU_URLLC_Env(gym.Env):
         Tính toán chi phí phân mảnh PRB
         """
         urllc_frag = 0
-        for i in range(len(self.num_urllc)):
+        for i in range(self.num_urllc):
             urllc_frag += (np.sum(self.PRB_slice[i]))**2 # Cộng với bình phương số PRB phân cho slice của từng slice
         return urllc_frag
     
@@ -236,7 +247,7 @@ class RU_URLLC_Env(gym.Env):
         Tính toán năng lượng tiêu tốn
         """
         urllc_energy = 0
-        for i in range(len(self.num_urllc)):
+        for i in range(self.num_urllc):
             for u in range(len(self.slices[i].ue_set)):
                 for b in range(len(self.RU.bwps)):
                     urllc_energy += self.alloc[i][b][u] * self.RU.bwps[b].p_each_PRB * self.RU.bwps[b].time
@@ -249,7 +260,7 @@ class RU_URLLC_Env(gym.Env):
         Tính toán chi phí chuyển BWP 
         """
         urllc_switch = 0
-        for i in range(len(self.num_urllc)):
+        for i in range(self.num_urllc):
             for b in range(len(self.RU.bwps)):
                 urllc_switch += self.cost_switch * self.BWP_slice[i][b] * (1 - self.last_BWP_slice[i][b])
         return urllc_switch
@@ -260,7 +271,7 @@ class RU_URLLC_Env(gym.Env):
         Tính toán chi phí guardband
         """
         urllc_guard = 0
-        for i in range(len(self.num_urllc)):
+        for i in range(self.num_urllc):
             for b in range(len(self.RU.bwps)):
                 for bk in range(len(self.RU.bwps)):
                     if bk != b:
@@ -294,10 +305,22 @@ class RU_URLLC_Env(gym.Env):
         # Tính tỷ lệ biến động
         variation_ratio = total_changes / (total_elements + 1e-9)
         
-        # 4. Áp dụng hàm exp(-x)[cite: 2]
+        # 4. Áp dụng hàm exp(-x)
         psi = np.exp(-variation_ratio)
         
         return float(psi)
+
+
+    def transBWPslice(self):
+        """
+        Hàm cập nhật việc slice có sử dụng BWP không
+        """
+        for i in range(self.num_urllc):
+            for b in range(len(self.RU.bwps)):
+                if sum(self.alloc[i][b]) > 0:
+                    self.BWP_slice[i][b] = 1
+                else:
+                    self.BWP_slice[i][b] = 0 
 
 
     def returnAlloc(self):

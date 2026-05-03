@@ -103,22 +103,34 @@ class ReplayBuffer:
         state = np.array(state, dtype=np.float32).flatten()
         next_state = np.array(next_state, dtype=np.float32).flatten()
         action = np.array(action, dtype=np.float32).flatten()
+        done = 1 if done else 0
         reward = float(reward)
-        done = float(done)
+        done = float(done)   
+
         self.buffer.append((state, action, reward, next_state, done))
         if len(self.buffer) > self.capacity:
             self.buffer.pop(0)
 
     def sample(self, batch_size):
         batch = random.sample(self.buffer, batch_size)
-        state, action, reward, next_state, done = map(np.array, zip(*batch))
-        return (
-            torch.FloatTensor(state),
-            torch.FloatTensor(action) if self.forSAC else torch.LongTensor(action),
-            torch.FloatTensor(reward),
-            torch.FloatTensor(next_state),
-            torch.FloatTensor(done),
-        )
+        states, actions, rewards, next_states, dones = zip(*batch)
+
+        # stack để đảm bảo cùng shape
+        states = torch.FloatTensor(np.stack(states))
+        next_states = torch.FloatTensor(np.stack(next_states))
+
+        # action có thể nhiều chiều, nên cũng stack
+        if self.forSAC:
+            actions = torch.FloatTensor(np.stack(actions))
+        else:
+            actions = torch.LongTensor(np.stack(actions))
+
+        rewards = torch.FloatTensor(rewards).unsqueeze(1)
+        dones = torch.FloatTensor(dones).unsqueeze(1)
+
+
+        return states, actions, rewards, next_states, dones
+
 
     def __len__(self):
         return len(self.buffer)

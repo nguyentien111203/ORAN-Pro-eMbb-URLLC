@@ -7,10 +7,12 @@ class BandwidthPart:
         p_each_PRB: công suất mỗi PRB ở BWP này
         """
         self.id = id
+        self.band_index = band_index
         self.num_prb = num_prb
-        self.bandwidth = (2**band_index) * base_bw
-        self.time = (1/(2**band_index)) * base_time
+        self.bandwidth = (2**self.band_index) * base_bw
+        self.time = (1/(2**self.band_index)) * base_time
         self.p_each_PRB = p_each_PRB
+        
 
 class RadioUnit:
     def __init__(self, Ru_index, bwps):

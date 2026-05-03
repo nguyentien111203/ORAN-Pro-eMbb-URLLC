@@ -3,20 +3,21 @@ import matplotlib.pyplot as plt
 from tqdm import trange
 from collections import deque
 
-def train_dqn_urllc(env, agent, num_episodes):
+def train_dqn_urllc(env, agent, num_slices, num_episodes, initBWP_slice):
     """
     Huấn luyện DQN với đánh giá greedy định kỳ (không plot trong hàm này)
+    initBWP_slice : phân bổ PRB từ các RU về các slice ban đầu
     """
     losses = []
-    dqn_model_path = f"./combine/DQN/model/best_dqn_RU{getattr(env, 'RU_index', 0)}_{env.num_slices}_{env.num_urllc}.pth"
+    dqn_model_path = f"./combine/DQN/model/best_dqn_RU{getattr(env, 'RU_index', 0)}_{num_slices}_{env.num_urllc}.pth"
 
     window_size = 10                      # độ dài cửa sổ trung bình
     reward_window = deque(maxlen=window_size)
     avg_rewards = []                      # lưu reward trung bình trượt
+    state = np.zeros(env.state_dim)
     losses = []
 
     for ep in trange(num_episodes, desc=f"Training DQN (RU {getattr(env, 'RU_index', 0)})"):
-        state = env.reset()
         done = False
         total_loss = 0.0
         total_reward = 0.0
@@ -24,7 +25,7 @@ def train_dqn_urllc(env, agent, num_episodes):
 
         while not done:
             # --- Chọn hành động ---
-            action = agent.select_action(state)
+            action = agent.select_action(state, initBWP_slice)
 
             # --- Tương tác môi trường ---
             next_state, reward, done, info = env.step(action)

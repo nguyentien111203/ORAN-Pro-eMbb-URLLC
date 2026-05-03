@@ -19,10 +19,14 @@ def main():
                           num_urllc_ue, num_embb_ue)
 
     embb_envs, urllc_envs, embb_dqn_agents, urllc_dqn_agents, frame_env, sac_agent = buildEnvAgent(
-        RUs, embb_slices, urllc_slices, H, consta["inter_RU"], consta["inter_factor"], consta["w_reward"], consta["cost_switch"],
-        consta["cost_gb"], scale_max, trainCons)
+        RUs, embb_slices, urllc_slices, H, consta["inter_RU"], consta["inter_factor"], 
+        consta["N0_mW_per_MHz"], consta["w_reward"], consta["cost_switch"],
+        consta["cost_gb"], scale_max, trainCons, consta["frame_slots"])
 
-    sac_model_path, dqn_model_paths = alternating_training(embb_envs, urllc_envs, embb_dqn_agents, urllc_dqn_agents, frame_env, sac_agent)
+    embb_models_path, urllc_models_path, sac_model_path = alternating_training(len(RUs), embb_envs, urllc_envs, 
+                    embb_dqn_agents, urllc_dqn_agents, frame_env, 
+                    sac_agent, trainCons["forDQN"]["dqn_train_episodes"],
+                    trainCons["forSAC"]["sac_train_episodes"])
 
     
     #header = ["num_RUs", "num_slices", "num_URLLC", "num_PRB_per_RU", "Pmax_mW",

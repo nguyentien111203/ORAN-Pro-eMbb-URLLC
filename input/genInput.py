@@ -229,14 +229,18 @@ def calculateScaleMax(RUs, embb_slices, urllc_slices, cost_switch, cost_gb):
     cGuardB = 0
     for r in RUs:
         cFrag += len(r.bwps)
-        maxIndex = np.argmax(r.bwps[b].index for b in range(len(r.bwps)))
-        minIndex = np.argmin(r.bwps[b].index for b in range(len(r.bwps)))
+        maxIndex = np.argmax(r.bwps[b].band_index for b in range(len(r.bwps)))
+        minIndex = np.argmin(r.bwps[b].band_index for b in range(len(r.bwps)))
         gapIndex = maxIndex - minIndex
         for b in r.bwps:
             cEneMax += b.num_prb * b.p_each_PRB * b.time
             cSwitch += cost_switch * num_slices
             cGuardB += cost_gb * gapIndex * num_slices
     cFrag = cFrag**2
+
+    # Kiếm tra xem cGuardB có bị 0 hay không (cái này là cái duy nhất có thể bị 0)
+    if cGuardB == 0:
+        cGuardB = 1
 
     scaleMax = [cEneMax, cFrag, cSwitch, cGuardB]
 

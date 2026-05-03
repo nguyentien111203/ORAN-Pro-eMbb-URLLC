@@ -60,16 +60,16 @@ class MultiHeadDQNAgent:
     def __init__(
         self,
         state_dim,
-        num_urllc,
-        num_urllc_ue,
+        num_slices,
+        num_slice_ue,
         num_bwp,
         train_cons,
         buffer_capacity=10000,
     ):
         self.device = torch.device(train_cons["device"])
         self.state_dim = state_dim
-        self.num_urllc = num_urllc
-        self.num_urllc_ue = num_urllc_ue
+        self.num_slices = num_slices
+        self.num_slice_ue = num_slice_ue
         self.num_bwp = num_bwp
         self.gamma = train_cons["gamma"]
         self.batch_size = train_cons["batch_size"]
@@ -81,10 +81,10 @@ class MultiHeadDQNAgent:
 
         # Mạng Q chính & target (dùng cùng cấu hình)
         self.policy_net = MultiHeadDQN(
-            state_dim, num_urllc, num_bwp, num_urllc_ue
+            state_dim, num_slices, num_bwp, num_slice_ue
         ).to(self.device)
         self.target_net = MultiHeadDQN(
-            state_dim, num_urllc, num_bwp, num_urllc_ue
+            state_dim, num_slices, num_bwp, num_slice_ue
         ).to(self.device)
 
         # Đồng bộ trọng số ban đầu
@@ -112,37 +112,38 @@ class MultiHeadDQNAgent:
         with torch.no_grad():
             # q_values shape: [total_max_prbs, max_ues_per_slice]
             # Hoặc một cấu hình phù hợp với số UE lớn nhất bạn quản lý
-            q_values = self.policy_net(state_t).squeeze(0).cpu().numpy()
+            q_values = self.policy_net(state_t)
 
-        prb_offset = 0 # Điểm bắt đầu dải PRB của slice hiện tại[cite: 2]
+        prb_offset = 0 # Điểm bắt đầu dải PRB của slice hiện tại
         
-        # 2. Duyệt qua từng slice dựa trên số lượng slice URLLC[cite: 2]
-        for s_idx, budget in enumerate(BWP_slice):
-            budget = int(budget)
-            if budget <= 0:
-                all_allocations[s_idx] = np.array([])
-                continue
-                
-            # Lấy số lượng UE mà slice s phục vụ[cite: 2]
-            num_ues = self.num_urllc_ue[s_idx]
+        for s_idx in range(len(BWP_slice[0])):   # duyệt qua từng slice
+            num_ues = self.num_slice_ue[s_idx]
+            slice_allocations = []
 
-            # 3. Thực hiện Epsilon-Greedy để chọn UE cho từng PRB[cite: 2]
-            if np.random.rand() < self.eps:
-                # Chọn ngẫu nhiên index UE từ 0 đến num_ues-1[cite: 2]
-                selected_ues = np.random.randint(0, num_ues, size=budget)
-            else:
-                # Lấy đoạn Q-values tương ứng với ngân sách PRB của slice s[cite: 2]
-                # và giới hạn không gian hành động theo số UE của slice đó (Masking)[cite: 2]
-                slice_q_segment = q_values[prb_offset : prb_offset + budget, :num_ues]
-                
-                # Chọn UE có index mang lại Q-value lớn nhất[cite: 2]
-                selected_ues = np.argmax(slice_q_segment, axis=-1)
+            for bwp_idx in range(len(BWP_slice)):   # duyệt qua từng BWP trong slice
+                budget = BWP_slice[bwp_idx][s_idx]
 
-            all_allocations[s_idx] = selected_ues
-            
-            # 4. Cập nhật offset để slice tiếp theo nhận đoạn PRB kế tiếp[cite: 2]
-            prb_offset += budget
+                if budget <= 0:
+                    slice_allocations.append(np.array([]))
+                    continue
 
+                if np.random.rand() < self.eps:
+                    # chọn ngẫu nhiên UE cho từng PRB trong budget
+                    selected_ues = np.random.randint(0, num_ues, size=int(budget))
+                else:
+                    # lấy đoạn Q-values tương ứng với budget PRB của BWP này
+                    slice_q_segment = q_values[prb_offset : prb_offset + budget, :num_ues]
+
+                    # chọn UE có Q-value lớn nhất cho từng PRB
+                    selected_ues = np.argmax(slice_q_segment, axis=-1)
+
+                slice_allocations.append(selected_ues)
+
+                # cập nhật offset cho BWP tiếp theo
+                prb_offset += budget
+
+            # lưu toàn bộ phân bổ của slice này (theo từng BWP)
+            all_allocations[s_idx] = slice_allocations
         return all_allocations
 
 

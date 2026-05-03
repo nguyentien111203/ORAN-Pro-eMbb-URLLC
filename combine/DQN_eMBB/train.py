@@ -5,12 +5,12 @@ import torch
 from collections import deque
 
 
-def train_dqn_embb(env, agent, num_episodes):
+def train_dqn_embb(env, agent, num_episodes, initBWP_slice):
     """
     Huấn luyện DQN với đánh giá greedy định kỳ (không plot trong hàm này)
+    initBWP_slice : phân bổ PRB từ các BWP từ các RU cho các slice ban đầu
     """
     losses = []
-    best_eval = -float("inf")
     dqn_model_path = f"./combine/DQN/model/best_dqn_RU{getattr(env, 'RU_index', 0)}_{env.num_slices}_{env.num_urllc}.pth"
 
     window_size = 10                      # độ dài cửa sổ trung bình
@@ -27,7 +27,7 @@ def train_dqn_embb(env, agent, num_episodes):
 
         while not done:
             # --- Chọn hành động ---
-            action = agent.select_action(state)
+            action = agent.select_action(state, initBWP_slice)
 
             # --- Tương tác môi trường ---
             next_state, reward, done, info = env.step(action)

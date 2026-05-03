@@ -79,18 +79,20 @@ class SACAgent:
         beta: hệ số smoothing (0: không smooth, gần 1: rất smooth)
         """
         # 1. Chuẩn bị state
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        state = torch.as_tensor(state, dtype=torch.float32, device=self.device)
 
         # 2. Forward qua Actor (SAC thường output mean và log_std)
         with torch.no_grad():
             # Ở chế độ inference (select_action), ta thường lấy mean và áp dụng tanh 
             # để giới hạn về [-1, 1] trước khi map sang xác suất
             mean, _ = self.actor.forward(state)
-            raw_action = torch.tanh(mean).cpu().numpy()[0]
+            raw_action = (torch.tanh(mean) + 1) / 2  # đưa về [0,1]
+            raw_action = raw_action * self.action_scale + self.action_bias
+
         
         # 3. Reshape về cấu hình [R, B, S] 
         # R: số RU, B: số BWP mỗi RU, S: số Slice
-        action = raw_action.reshape(self.action_shape)
+        action = raw_action.reshape((self.num_rus, max(self.num_bwp_ru), self.num_slices))
 
         # 4. Softmax per BWP của từng RU
         # Đảm bảo tổng tỷ lệ PRB của các Slice (s) trên mỗi BWP (b) tại mỗi RU (r) là 1.0
@@ -98,8 +100,8 @@ class SACAgent:
             for b in range(action.shape[1]):  # Duyệt qua từng BWP
                 slice_weights = action[r, b]
                 # Softmax ổn định số học
-                exp_weights = np.exp(slice_weights - np.max(slice_weights))
-                action[r, b] = exp_weights / (np.sum(exp_weights) + 1e-9)
+                exp_weights = np.exp(slice_weights - max(slice_weights))
+                action[r, b] = exp_weights / (sum(exp_weights) + 1e-9)
 
         # 5. Action Smoothing (Nỗ lực ổn định SAC)
         # Giúp giảm chi phí chuyển đổi C_s và giữ môi trường ổn định cho các DQN tầng dưới
@@ -123,9 +125,9 @@ class SACAgent:
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
         states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
         actions = torch.as_tensor(actions, dtype=torch.float32, device=self.device)
-        rewards = torch.as_tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(-1)
+        rewards = torch.as_tensor(rewards, dtype=torch.float32, device=self.device)
         next_states = torch.as_tensor(next_states, dtype=torch.float32, device=self.device)
-        dones = torch.as_tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(-1)
+        dones = torch.as_tensor(dones, dtype=torch.float32, device=self.device)
 
         # local alpha value (do NOT mutate self.alpha here)
         alpha_val = float(self.log_alpha.exp().clamp(1e-8, 10.0))
@@ -153,6 +155,7 @@ class SACAgent:
         # ----------------------------
         current_q1 = self.critic_1(torch.cat([states, actions], dim=-1))
         current_q2 = self.critic_2(torch.cat([states, actions], dim=-1))
+
 
         critic_loss_fn = nn.SmoothL1Loss()
         critic_1_loss = critic_loss_fn(current_q1, target_q)

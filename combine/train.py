@@ -13,7 +13,8 @@ from combine.DQN_URLLC.train import train_dqn_urllc
 from combine.SAC.train_SAC import train_sac
 
 
-def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, inter_factor, w_reward, cost_switch, cost_gb, scale_max, train_cons):
+def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, inter_factor, N0,
+                  w_reward, cost_switch, cost_gb, scale_max, train_cons, frame_slots):
     """
     Dựng các môi trường và agent cho SAC và DQN
     set of Radio Unit RUs : tập các RU
@@ -43,28 +44,36 @@ def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, inter_factor, w_r
 
     for r in range(len(RUs)):
         # Khởi tạo môi trường và agent cho từng loại slice ở từng RU
-        urllc_env = RU_URLLC_Env(RUs[r], urllc_slices, len(urllc_slices), H[r][0][:len(urllc_slices)], 
-                                 inter_RU, inter_factor, w_reward, cost_switch, cost_gb, scale_max, train_cons["forDQN"])
-        #embb_env = RU_eMBB_Env(RUs[r], embb_slices, len(embb_slices), H[r][0][len(urllc_slices):len(urllc_slices)+len(embb_slices)], 
-        #                       inter_RU, inter_factor, w_reward, cost_switch, cost_gb, scale_max, train_cons["forDQN"])
-
-        urllc_agent = MultiHeadDQNAgent(1, len(urllc_slices), num_urllc_ue, len(RUs[r].bwps), train_cons["forDQN"])
-        #embb_agent = MultiHeadDQNAgent(1, len(embb_slices), num_embb_ue, len(RUs[r].bwps), train_cons["forDQN"])
-
-        #embb_envs.append(embb_env)
-        urllc_envs.append(urllc_env)
-        #embb_dqn_agents.append(embb_agent)
-        urllc_dqn_agents.append(urllc_agent)
+        # Kiếm tra xem số urllc thế nào
+        if len(urllc_slices) != 0:
+            urllc_env = RU_URLLC_Env(RUs[r], urllc_slices, len(urllc_slices), H[r][0][:len(urllc_slices)], 
+                                    inter_RU, inter_factor, N0, w_reward, cost_switch, 
+                                    cost_gb, scale_max, train_cons["forDQN"], frame_slots)
+            urllc_envs.append(urllc_env)
+            urllc_agent = MultiHeadDQNAgent(urllc_env.state_dim, len(urllc_slices), num_urllc_ue, len(RUs[r].bwps), train_cons["forDQN"])
+            urllc_env.assign_dqn_agent(urllc_agent)
+            urllc_dqn_agents.append(urllc_agent)
+        if len(embb_slices) != 0:
+            embb_env = RU_eMBB_Env(RUs[r], embb_slices, len(embb_slices), H[r][0][len(urllc_slices):len(urllc_slices)+len(embb_slices)], 
+                                inter_RU, inter_factor, N0, w_reward, cost_switch, cost_gb, 
+                                scale_max, train_cons["forDQN"], frame_slots)
+            embb_agent = MultiHeadDQNAgent(embb_env.state_dim, len(embb_slices), num_embb_ue, len(RUs[r].bwps), train_cons["forDQN"])
+            embb_envs.append(embb_env)
+            embb_env.assign_dqn_agent(embb_agent)
+            embb_dqn_agents.append(embb_agent)
+        
 
     # Frame env và SAC agent
     num_bwp_ru = [len(RUs[r].bwps) for r in range(len(RUs))]
-    frame_env = FrameEnv(urllc_envs, embb_envs, urllc_slices, embb_slices, H, w_reward)
-    sac_agent = SACAgent(1, len(RUs), num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"])
+    frame_env = FrameEnv(RUs, urllc_envs, embb_envs, urllc_slices, embb_slices, H, w_reward, scale_max, frame_slots)
+    sac_agent = SACAgent(4 + len(urllc_slices) + len(embb_slices), len(RUs), 
+                         num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"])
 
     return embb_envs, urllc_envs, embb_dqn_agents, urllc_dqn_agents, frame_env, sac_agent
 
 
-def alternating_training(embb_envs, urllc_envs, embb_dqn_agents, urllc_dqn_agents, frame_env, sac_agent):
+def alternating_training(num_rus, embb_envs, urllc_envs, embb_dqn_agents, 
+                         urllc_dqn_agents, frame_env, sac_agent, numepDQN, numepSAC):
     """
     Hàm thực hiện train mô hình và lưu
     Input :
@@ -82,17 +91,24 @@ def alternating_training(embb_envs, urllc_envs, embb_dqn_agents, urllc_dqn_agent
     embb_models_path = []
     urllc_models_path = []
 
+    # Budget cho các slice ban đầu
+    BWP_slice = [[[frame_env.RUs[r].bwps[b].num_prb / frame_env.num_slices 
+                   for _ in range(frame_env.num_slices)] 
+                  for b in range(len(frame_env.RUs[r].bwps))] for r in range(num_rus)]
+
     # Train DQN ở từng RU
-    for r in range(len(embb_envs)):
+    for r in range(num_rus):
         print(f"-- Training DQN agents {r} --")
-        embb_model = train_dqn_embb(embb_envs[r], embb_dqn_agents[r])
-        urllc_model = train_dqn_urllc(urllc_envs[r], urllc_dqn_agents[r])
-        embb_models_path.append(embb_model)
-        urllc_models_path.append(urllc_model)
+        if len(embb_dqn_agents) != 0:
+            embb_model = train_dqn_embb(embb_envs[r], embb_dqn_agents[r], frame_env.num_slices, numepDQN, BWP_slice[r])
+            embb_models_path.append(embb_model)
+        if len(urllc_dqn_agents) != 0:
+            urllc_model = train_dqn_urllc(urllc_envs[r], urllc_dqn_agents[r], frame_env.num_slices, numepDQN, BWP_slice[r])
+            urllc_models_path.append(urllc_model)
 
     # Train SAC chung
     print("-- Training SAC (frame-level) --")
-    sac_model_path = train_sac(frame_env, sac_agent)
+    sac_model_path = train_sac(frame_env, sac_agent, numepSAC)
 
     print("Training complete.")
     return embb_models_path, urllc_models_path, sac_model_path
