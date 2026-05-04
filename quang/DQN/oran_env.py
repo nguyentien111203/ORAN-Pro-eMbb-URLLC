@@ -7,7 +7,7 @@ import random
 from combine.DQN.multiagent_DQN import MultiHeadDQN 
 from combine.common.common import MLP
 from scipy.special import ndtri, lambertw # cho hàm Q^-1, Lambert
-
+from embb_math import get_embb_state, get_embb_reward
 
 class SlotEnv(gym.Env):
     """
@@ -30,6 +30,17 @@ class SlotEnv(gym.Env):
         self.T_max = T_max
         self.eps = eps
         self.max_steps = max_steps
+        self.R_min = 50.0  
+        self.C_e_max = self.RU.Pmax * self.num_PRB 
+        self.C_s_max = self.num_PRB  
+        self.C_f_max = (self.num_PRB)**2 
+        self.C_g_max = self.num_PRB
+        
+        self.x_prev = np.zeros(self.num_PRB) # Needed for switching cost
+        
+        # Make sure your state_dim is 6 so the DQN accepts it!
+        self.state_dim = 6
+        self.observation_space = spaces.Box(low=0, high=1, shape=(self.state_dim,), dtype=np.float32)
 
         # Reward weights (merge all weights)
         self.w_reward = w_reward or {"thr": 0.6, "sla": 0.25, "fair": 0.1, "stab": 0.05}
@@ -63,119 +74,62 @@ class SlotEnv(gym.Env):
         self.dqn_agent = agent
 
     def get_state(self):
-        """
-        Sinh trạng thái đầu vào cho DQN agent.
-        Bao gồm:
-            - Trung bình gain của từng slice (chuẩn hóa)
-            - Tỷ lệ công suất được SAC cấp cho từng slice
-            - Utilization: mức độ sử dụng PRB
-            - Load: tỷ lệ backlog / throughput
-        """
-        # ===== Trung bình channel gain =====
-        # H có shape (num_slices, num_PRB)
-        ch_avg = np.mean(self.H, axis=1)
-        ch_avg = ch_avg / (np.max(ch_avg) + 1e-9)
+        """Uses your embb_math.py to get the Equation 29 State"""
+        # Calculate raw costs based on current allocations
+        sumeMBBThr = np.sum([self.eMBBThr[i] for i in range(self.num_slices) if self.slices[i].name == "eMBB"]) if hasattr(self, 'eMBBThr') else 0.0
+        C_e = np.sum(self.power_alloc) if hasattr(self, 'power_alloc') else 0.0
+        C_s = np.sum(self.x_alloc != self.x_prev) if hasattr(self, 'x_prev') else 0.0
+        C_f = len(set(self.x_alloc[self.x_alloc > 0])) * 2.0 if hasattr(self, 'x_alloc') else 0.0
+        C_g = 1.0
+        
+        # Call the function from embb_math.py
+        state = get_embb_state(
+            sumeMBBThr, self.R_min, C_e, self.C_e_max, C_s, self.C_s_max, 
+            C_f, self.C_f_max, C_g, self.C_g_max, 
+            self.x_alloc if hasattr(self, 'x_alloc') else np.zeros(self.num_PRB), 
+            self.x_prev if hasattr(self, 'x_prev') else np.zeros(self.num_PRB)
+        )
+        return state
 
-        # ===== Tỷ lệ công suất được cấp cho từng slice =====
-        if np.sum(self.power_budget) > 0:
-            slice_ratios = self.power_budget / np.sum(self.power_budget)
-        else:
-            slice_ratios = np.ones(self.num_slices) / self.num_slices
-
-        # ===== Utilization: tỷ lệ PRB đang dùng =====
-        if hasattr(self, "x_alloc") and self.x_alloc is not None:
-            util = np.count_nonzero(self.x_alloc) / self.num_PRB
-        else:
-            util = 0.0
-
-        # ===== Load: tổng buffer / tổng throughput =====
-        total_buffer = 0.0
-        total_rate = 0.0
-        if hasattr(self, "slices"):
-            for sl in self.slices:
-                total_buffer += getattr(sl, "buffer", 0.0)
-                total_rate += getattr(sl, "current_rate", 0.0)
-
-        if total_rate <= 0:
-            load = 0.0
-        else:
-            load = np.clip(total_buffer / (total_rate + 1e-9), 0, 1.5)
-
-        # ===== Ghép thành vector trạng thái =====
-        state = np.concatenate([
-            ch_avg[:min(len(ch_avg), self.num_slices)],
-            slice_ratios,
-            [util, load]
-        ])
-
-        # ===== Đảm bảo đúng kích thước state_dim =====
-        if len(state) < self.state_dim:
-            state = np.pad(state, (0, self.state_dim - len(state)))
-        elif len(state) > self.state_dim:
-            state = state[:self.state_dim]
-
-        return state.astype(np.float32)
-
-    def select_action(self, state, eval_mode=False):
-        """Nếu có DQN agent thì dùng policy của nó, nếu không thì random."""
-        if self.dqn_agent is not None:
-            return self.dqn_agent.select_action(state, eval_mode=eval_mode)
-        return self.action_space.sample()
-
-    # Core environment logic
-    def reset(self):
-        self.current_step = 0
-        self.last_info = None
-        return self.get_state()
-
-    def step(self, action, state):
-        """
-        Môi trường SlotEnv thực hiện 1 bước (slot):
-            - action: vector độ dài num_PRB, mỗi phần tử là index của slice
-            - state: state hiện tại (để tính stability)
-        Trả về:
-            state_next, reward, done, info
-        """
+    def step(self, action, state_input=None):
         self.current_step += 1
+        
+        # 1. Update Allocations
+        self.x_prev = self.x_alloc.copy()
         self.x_alloc = np.array(action)
         self.power_alloc = self.distribute_power_to_prbs(self.x_alloc)
        
+        # 2. Physics Engine
         snr = self.calculateSNR(self.x_alloc)
         self.eMBBThr, URLLCCapa = self.calculateSliceCapacity(self.x_alloc, snr)
 
-        # TÍNH QoS, SLA, FAIRNESS, STABILITY
-        fairness = self.calculateFairness(self.eMBBThr)
-        stability = self.calculateStability(self.x_alloc, state)
-        sumeMBBThr = np.sum(
-            self.eMBBThr[i] for i in range(self.num_slices)
-            if self.slices[i].name == "eMBB"
-        )
-        util =  np.count_nonzero(self.x_alloc) / self.num_PRB
+        # 3. Calculate Raw Costs
+        C_e = np.sum(self.power_alloc)
+        C_s = np.sum(self.x_alloc != self.x_prev) * 1.0
+        C_f = len(set(self.x_alloc[self.x_alloc > 0])) * 2.0 
+        C_g = 1.0 
 
-        # TÍNH REWARD (THỰC TẾ)
-        reward = (
-            self.w_reward["thr"] * (sumeMBBThr / (self.T_max + 1e-9)) +
-            self.w_reward["fair"] * fairness +
-            self.w_reward["stab"] * stability +
-            self.w_reward["util"] * util
-        )
-
-
-        # CẬP NHẬT STATE & KIỂM TRA DONE
+        # 4. Get New State & Reward using your embb_math.py
         state_next = self.get_state()
-        done = self.current_step >= self.max_steps
+        psi = state_next[5] # Extract Psi from the state vector
+        
+        # Get just the throughputs for eMBB users
+        ue_throughputs = [self.eMBBThr[i] for i in range(self.num_slices) if self.slices[i].name == "eMBB"]
+        
+        reward = get_embb_reward(
+            ue_throughputs, self.R_min, C_e, self.C_e_max, C_s, self.C_s_max,
+            C_f, self.C_f_max, C_g, self.C_g_max, psi
+        )
 
-        # LOGGING THÔNG TIN
+        done = self.current_step >= self.max_steps
         info = {
             "Throughput_eMBB": self.eMBBThr,
             "Capa_URLLC" : URLLCCapa,
-            "Fairness": fairness,
-            "Stability": stability,
-            "Utilization": util,
+            "Reward": reward
         }
-        self.last_info = info
 
         return state_next, reward, done, info
+
 
     # Helper computation functions
     def calculateSNR(self, x_alloc):
