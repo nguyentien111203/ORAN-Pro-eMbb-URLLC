@@ -102,12 +102,16 @@ class ReplayBuffer:
         # 0 đại diện cho việc không phân bổ
         state = np.array(state, dtype=np.float32).flatten()
         next_state = np.array(next_state, dtype=np.float32).flatten()
-        action = np.array(action, dtype=np.float32).flatten()
+        action_flat = np.concatenate([
+            ue_alloc
+            for slice_alloc in action
+            for ue_alloc in slice_alloc
+        ])
         done = 1 if done else 0
         reward = float(reward)
         done = float(done)   
 
-        self.buffer.append((state, action, reward, next_state, done))
+        self.buffer.append((state, action_flat, reward, next_state, done))
         if len(self.buffer) > self.capacity:
             self.buffer.pop(0)
 

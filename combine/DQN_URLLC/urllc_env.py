@@ -68,7 +68,6 @@ class RU_URLLC_Env(gym.Env):
         # Tỷ lệ SINR của từng UE với từng PRB của từng BWP
         self.snr = [[[0 for u in range(len(self.slices[i].ue_set))] for b in range(len(self.RU.bwps))] for i in range(self.num_urllc)]
         
-        self.init_numBit = [[0 for _ in range(len(self.slices[slice_index].ue_set))] for slice_index in range(self.num_urllc)]
         self.index_subframe = 0 # index của subframe đang xét hiện tại
 
         # Ma trận thể hiện slice URLLC có sử dụng BWP không, các giá trị là 0,1
@@ -83,7 +82,7 @@ class RU_URLLC_Env(gym.Env):
 
 
     def assign_dqn_agent(self, agent):
-        """Gán DQN agent để dùng khi FrameEnv gọi env.select_action()."""
+        """Gán DQN agent để dùng khi FrameEnv gọi env.select_action(), bắt buộc"""
         self.dqn_urllc_agent = agent
 
 
@@ -94,14 +93,23 @@ class RU_URLLC_Env(gym.Env):
         self.H = Hnew
 
 
-    def get_state(self, urllc_rate, cEne, cFrag, cSwit, cGB):
+    def get_state(self, urllc_rate, cEne, cFrag, cSwit, cGB, stab):
         """
-        Tạo ma trận state cho DQN URLLC (để sau)
+        Tạo ma trận state cho DQN URLLC, bắt buộc
         """
         # Bẻ thẳng urllc_rate
-        flat_urllc_rate = [urllc_rate[i][u] for i in range(len(urllc_rate)) for u in range(len(urllc_rate[i]))]
-        state = np.concatenate([flat_urllc_rate, cEne / self.scale_max[0], cFrag / self.scale_max[1],
-                                cSwit / self.scale_max[2], cGB / self.scale_max[3]])
+        flat_urllc_rate = [urllc_rate[i][u] for i in range(len(urllc_rate)) 
+                           for u in range(len(urllc_rate[i]))]
+        state = np.concatenate((
+            np.array(flat_urllc_rate),
+            np.array([
+                cEne / self.scale_max[0],
+                cFrag / self.scale_max[1],
+                cSwit / self.scale_max[2],
+                cGB / self.scale_max[3],
+                stab
+            ])
+        ))
          
         return state.astype(np.float32)
 
@@ -118,28 +126,14 @@ class RU_URLLC_Env(gym.Env):
         Reset lại ma trận phân bổ khi xét đến slot mới (reset lại số bit mà mỗi UE nhận, 
         và ghi đè lên các giá trị SINR, latency và số PRB được phân bổ (alloc))
         """
-        self.numBit = self.init_numBit
+        self.numBit = [[0 for _ in range(len(self.slices[slice_index].ue_set))] 
+                       for slice_index in range(self.num_urllc)] 
 
 
-    def step(self, action):
+    def computeOutput(self, action):
         """
-        Sau khi thực hiện action, tính toán reward, tìm ra state tiếp theo và 
-        trả về các thông tin về trễ của từng urllc
-
-        action : hành động phân bổ PRB từ từng slice về các UE
-
-        return state_next : trạng thái tiếp theo
-               float reward : reward khi action được thực hiện
-               done : đã thực hiện xong trong frame chưa để reset lại index_subframe
-               info : thông tin về trễ của từng UE urllc trong các slice
+        Tính số bit mà các slice nhận được
         """
-        if self.index_subframe < self.frame_slots:
-            self.index_subframe += 1
-        else :
-            self.index_subframe = 0
-
-        self.reset() # Reset lại số bit về ban đầu
-        
         # Lưu lại phân bổ số PRB từ action
         self.alloc = action
         self.transBWPslice()
@@ -150,6 +144,28 @@ class RU_URLLC_Env(gym.Env):
         self.calculateNumBit()
         self.calculateLatency()
 
+        return self.URLLC_Latency
+
+
+    def step(self, totalLatRate):
+        """
+        Sau khi thực hiện action, tính toán reward, tìm ra state tiếp theo và 
+        trả về các thông tin về trễ của từng urllc
+
+        action : hành động phân bổ PRB từ từng slice về các UE
+
+        return state_next : trạng thái tiếp theo
+               float reward : reward khi action được thực hiện
+               done : đã thực hiện xong trong frame chưa để reset lại index_subframe
+               info : thông tin về trễ của từng UE urllc trong các slice, bắt buộc
+        """
+        if self.index_subframe < self.frame_slots:
+            self.index_subframe += 1
+        else :
+            self.index_subframe = 0
+
+        self.reset() # Reset lại số bit về ban đầu
+        
         # Tính toán các chi phí
         cEne = self.calculateEnergy()
         cFrag = self.calculateFrag()
@@ -157,14 +173,9 @@ class RU_URLLC_Env(gym.Env):
         cGB = self.calculateGuardBand()
         stab = self.calculateStab()
 
-        # Tính toán các tỷ lệ được phục vụ
-        urllc_rate = [[0 for _ in range(len(self.slices[slice_index].ue_set))] for slice_index in range(self.num_urllc)]
-        for s in range(self.num_urllc):
-            for u in range(len(self.slices[s].ue_set)):
-                urllc_rate[s][u] = self.URLLC_Latency[s][u] / self.slices[s].ue_set[u].lat
 
-        reward = self.w_reward["lat"] * sum(1 - urllc_rate[s][u] for slice_index in range(self.num_urllc) 
-                                             for _ in range(len(self.slices[slice_index].ue_set))) + \
+        reward = self.w_reward["lat"] * sum(1 - totalLatRate[s][u] for s in range(self.num_urllc) 
+                                             for u in range(len(self.slices[s].ue_set))) + \
                 self.w_reward["cost"] * (4 - (cEne / self.scale_max[0]) - (cFrag / self.scale_max[1]) - \
                                          (cSwit / self.scale_max[2]) - (cGB / self.scale_max[3])) + stab
 
@@ -172,12 +183,11 @@ class RU_URLLC_Env(gym.Env):
         done = self.index_subframe > self.frame_slots
 
         # Đưa ra state tiếp theo và action tiếp
-        next_state = self.get_state(urllc_rate, cEne, cFrag, cSwit, cGB)
+        next_state = self.get_state(totalLatRate, cEne, cFrag, cSwit, cGB, stab)
         self.last_PRB_slice = self.PRB_slice
 
         # Thông tin các thứ
         info = {
-            "lat" : self.URLLC_Latency,
             "costE" : cEne,
             "costF" : cFrag,
             "costS" : cSwit,
@@ -191,13 +201,14 @@ class RU_URLLC_Env(gym.Env):
         """
         Tính toán nhiễu liên BWP
         """
+        leakage = 1e-7
         interBWP = np.zeros(self.num_urllc)
         for u in range(self.num_urllc):
             for b in range(len(self.RU.bwps)):
-                for bk in range(len(self.RU.bwps)):
+                for bk in range(b + 1, len(self.RU.bwps)):
                     if self.RU.bwps[b].band_index != self.RU.bwps[bk].band_index:
                         gapIndex = np.abs(self.RU.bwps[b].band_index - self.RU.bwps[bk].band_index)
-                        interBWP[u] += self.inter_factor * gapIndex \
+                        interBWP[u] += leakage * self.inter_factor * (1/(1+gapIndex)) \
                             * self.RU.bwps[bk].p_each_PRB * self.BWP_slice[bk][u]
         return interBWP
 
@@ -220,7 +231,7 @@ class RU_URLLC_Env(gym.Env):
         for i in range(self.num_urllc):
             for u in range(len(self.slices[i].ue_set)):
                 for b in range(len(self.RU.bwps)):
-                    self.numBit[i][u] += self.RU.bwps[b].time * self.alloc[i][u] * np.log2(1 + self.snr[i][b][u])
+                    self.numBit[i][u] += self.RU.bwps[b].time * self.alloc[i][b][u] * np.log2(1 + self.snr[i][b][u])
 
 
     def calculateLatency(self):
@@ -229,7 +240,9 @@ class RU_URLLC_Env(gym.Env):
         """
         for i in range(self.num_urllc):
             for u in range(len(self.slices[i].ue_set)):
-                self.URLLC_Latency[i][u] = self.slices[i].ue_set[u].pac / self.numBit[i][u]
+                urpac = self.slices[i].ue_set[u].pac
+                bitn = self.numBit[i][u]
+                self.URLLC_Latency[i][u] = urpac / bitn
 
 
     def calculateFrag(self):

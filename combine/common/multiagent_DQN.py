@@ -99,51 +99,51 @@ class MultiHeadDQNAgent:
 
 
     def select_action(self, state, BWP_slice):
-        """
-        Phân bổ UE cho các PRB của RU hiện tại dựa trên ngân sách từng slice.
-        BWP_slice: list chứa số lượng PRB cho từng slice [s0, s1, ...].
-        self.num_urllc_ue: list chứa số UE của từng slice [num_ue_s0, num_ue_s1, ...].
-        """
-        all_allocations = {}
-        
-        # 1. Chuẩn bị state và lấy Q-values từ mạng Neural
+
+        num_bwps = len(BWP_slice)
+        num_slices = len(BWP_slice[0])
+
+        all_allocations = [
+            [None for _ in range(num_bwps)]
+            for _ in range(num_slices)
+        ]
+
         state_t = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
-        
+
         with torch.no_grad():
-            # q_values shape: [total_max_prbs, max_ues_per_slice]
-            # Hoặc một cấu hình phù hợp với số UE lớn nhất bạn quản lý
             q_values = self.policy_net(state_t)
+            # q_values là list: [slice0_tensor, slice1_tensor, ...]
 
-        prb_offset = 0 # Điểm bắt đầu dải PRB của slice hiện tại
-        
-        for s_idx in range(len(BWP_slice[0])):   # duyệt qua từng slice
+        for s_idx in range(num_slices):
+
             num_ues = self.num_slice_ue[s_idx]
-            slice_allocations = []
 
-            for bwp_idx in range(len(BWP_slice)):   # duyệt qua từng BWP trong slice
-                budget = BWP_slice[bwp_idx][s_idx]
+            # bỏ batch dim
+            q_slice_all_bwp = q_values[s_idx].squeeze(0)
+            # shape: [num_bwps, max_ues]
+
+            for bwp_idx in range(num_bwps):
+
+                budget = int(BWP_slice[bwp_idx][s_idx])
 
                 if budget <= 0:
-                    slice_allocations.append(np.array([]))
+                    all_allocations[s_idx][bwp_idx] = np.zeros(num_ues, dtype=int)
                     continue
 
+                # lấy Q cho đúng BWP + UE
+                q_slice = q_slice_all_bwp[bwp_idx, :num_ues]
+
+                # ---- epsilon-greedy ----
                 if np.random.rand() < self.eps:
-                    # chọn ngẫu nhiên UE cho từng PRB trong budget
-                    selected_ues = np.random.randint(0, num_ues, size=int(budget))
+                    probs = np.ones(num_ues) / num_ues
                 else:
-                    # lấy đoạn Q-values tương ứng với budget PRB của BWP này
-                    slice_q_segment = q_values[prb_offset : prb_offset + budget, :num_ues]
+                    probs = torch.softmax(q_slice, dim=-1).cpu().numpy()
 
-                    # chọn UE có Q-value lớn nhất cho từng PRB
-                    selected_ues = np.argmax(slice_q_segment, axis=-1)
+                # ---- phân bổ PRB ----
+                prb_alloc = np.random.multinomial(budget, probs)
 
-                slice_allocations.append(selected_ues)
+                all_allocations[s_idx][bwp_idx] = prb_alloc
 
-                # cập nhật offset cho BWP tiếp theo
-                prb_offset += budget
-
-            # lưu toàn bộ phân bổ của slice này (theo từng BWP)
-            all_allocations[s_idx] = slice_allocations
         return all_allocations
 
 
@@ -185,14 +185,22 @@ class MultiHeadDQNAgent:
         q_values_per_slice = self.policy_net(state_batch)  # list [B, num_bwp, num_ue_slice_i]
 
         chosen_q_list = []
+
         for i, q_slice in enumerate(q_values_per_slice):
-            # action_batch[:, i, :] chứa hành động cho slice i (theo bwp)
-            # shape: [B, num_bwp]
-            act = action_batch[:, i, :].unsqueeze(-1)  # [B, num_bwp, 1]
+            # lấy đúng đoạn action của slice i
+            start = i * self.num_bwp
+            end = (i + 1) * self.num_bwp
+
+            act = action_batch[:, start:end]   # [B, num_bwp]
+
+            # gather cần index dạng [B, num_bwp, 1]
+            act = act.unsqueeze(-1)
+
             chosen_q = q_slice.gather(2, act).squeeze(2)  # [B, num_bwp]
+
             chosen_q_list.append(chosen_q)
 
-        # Ghép lại thành [B, num_urllc, num_bwp]
+        # [B, num_slices, num_bwp]
         chosen_q = torch.stack(chosen_q_list, dim=1)
 
         # Q mục tiêu

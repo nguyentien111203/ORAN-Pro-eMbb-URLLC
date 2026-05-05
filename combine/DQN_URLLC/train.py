@@ -14,7 +14,7 @@ def train_dqn_urllc(env, agent, num_slices, num_episodes, initBWP_slice):
     window_size = 10                      # độ dài cửa sổ trung bình
     reward_window = deque(maxlen=window_size)
     avg_rewards = []                      # lưu reward trung bình trượt
-    state = np.zeros(env.state_dim)
+    state = np.zeros(env.state_dim)       # bắt buộc
     losses = []
 
     for ep in trange(num_episodes, desc=f"Training DQN (RU {getattr(env, 'RU_index', 0)})"):

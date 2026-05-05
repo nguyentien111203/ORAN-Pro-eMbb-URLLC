@@ -3,15 +3,15 @@ ues:
   - id: ue_0
     slice_id: slice_urllc_0
     lat: 1.0 # ms
-    pac: 256 # byte
+    pac: 5 # byte
     
   - id: ue_1
     slice_id: slice_urllc_0
     lat: 1.0 # ms
-    pac: 256 # byte
+    pac: 5 # byte
 
   # Các UE thuộc slice_urllc_1
   - id: ue_0
     slice_id: slice_urllc_1
     lat: 1.0 # ms
-    pac: 256 # byte
+    pac: 5 # byte
