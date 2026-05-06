@@ -23,7 +23,7 @@ def main():
         consta["N0_mW_per_MHz"], consta["w_reward"], consta["cost_switch"],
         consta["cost_gb"], scale_max, trainCons, consta["frame_slots"])
 
-    embb_models_path, urllc_models_path, sac_model_path = alternating_training(len(RUs), embb_envs, urllc_envs, 
+    alternating_training(len(RUs), embb_envs, urllc_envs, 
                     embb_dqn_agents, urllc_dqn_agents, frame_env, 
                     sac_agent, trainCons["forDQN"]["dqn_train_episodes"],
                     trainCons["forSAC"]["sac_train_episodes"])

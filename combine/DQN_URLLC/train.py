@@ -1,58 +1,83 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from tqdm import trange
 from collections import deque
 
-def train_dqn_urllc(env, agent, num_slices, num_episodes, initBWP_slice):
-    """
-    Huấn luyện DQN với đánh giá greedy định kỳ (không plot trong hàm này)
-    initBWP_slice : phân bổ PRB từ các RU về các slice ban đầu
-    """
-    losses = []
-    dqn_model_path = f"./combine/DQN/model/best_dqn_RU{getattr(env, 'RU_index', 0)}_{num_slices}_{env.num_urllc}.pth"
+def train_dqn_urllc(envs, agents, num_episodes, initBWP_slice):
 
-    window_size = 10                      # độ dài cửa sổ trung bình
-    reward_window = deque(maxlen=window_size)
-    avg_rewards = []                      # lưu reward trung bình trượt
-    state = np.zeros(env.state_dim)       # bắt buộc
-    losses = []
+    num_ru = len(envs)
+    num_slices = envs[0].num_urllc
 
-    for ep in trange(num_episodes, desc=f"Training DQN (RU {getattr(env, 'RU_index', 0)})"):
+    # --- init ---
+    states = [np.zeros(envs[0].state_dim) for r in range(num_ru)]
+
+    losses = [[] for _ in range(num_ru)]
+    avg_rewards = [[] for _ in range(num_ru)]
+    reward_windows = [deque(maxlen=10) for _ in range(num_ru)]
+
+    # --- static info (vector hóa trước) ---
+    offsets = [0]
+    for n in envs[0].num_urllc_ue:
+        offsets.append(offsets[-1] + n)
+
+    pac = np.array([ue.pac for s in range(num_slices) for ue in envs[0].slices[s].ue_set])
+
+    lat_target = np.array([ue.lat for s in range(num_slices)for ue in envs[0].slices[s].ue_set])
+
+    # ================= TRAIN =================
+    for ep in trange(num_episodes, desc="Training DQN URLLC"):
+
         done = False
-        total_loss = 0.0
-        total_reward = 0.0
-        steps = 0
 
         while not done:
-            # --- Chọn hành động ---
-            action = agent.select_action(state, initBWP_slice)
 
-            # --- Tương tác môi trường ---
-            next_state, reward, done, info = env.step(action)
+            # ================= PHASE 1: ACTION =================
+            actions = [
+                agents[r].select_action(states[r], initBWP_slice[r])
+                for r in range(num_ru)
+            ]
 
-            # --- Lưu transition và train ---
-            agent.store_transition(state, action, reward, next_state, done)
-            loss = agent.optimize_model()
-            if loss is not None:
-                total_loss += loss
+            # ================= PHASE 2: COMPUTE OUTPUT =================
+            # numBits: (slice, ue)
+            numBits = np.array([0 for s in range(num_slices) for ue in envs[0].slices[s].ue_set], np.int32)
 
-            state = next_state
-            total_reward += reward
-            steps += 1
+            for r in range(num_ru):
+                # giả sử computeOutput trả numpy array (slice x ue)
+                numBits += envs[r].computeOutput(actions[r])
 
-        # --- Sau mỗi episode ---
-        agent.eps = max(agent.eps_end, agent.eps * agent.eps_decay)
-        avg_loss = total_loss / max(1, steps)
-        losses.append(avg_loss)
+            # ================= PHASE 3: GLOBAL METRIC =================
+            urllc_lat = pac / numBits
+            urllc_rate = urllc_lat / lat_target
 
-        # --- Cập nhật reward ---
-        reward_window.append(total_reward)
+            # ================= PHASE 4: UPDATE + TRAIN =================
+            next_states = [None] * num_ru
 
-        # Trung bình trượt (trên 10 ep gần nhất)
-        moving_avg = np.mean(reward_window)
-        avg_rewards.append(moving_avg)
+            for r in range(num_ru):
+                next_state, reward, done, _ = envs[r].step(urllc_rate)
 
-    return avg_rewards, losses, dqn_model_path
+                agents[r].store_transition(
+                    states[r], actions[r], reward, next_state, done
+                )
+
+                loss = agents[r].optimize_model()
+
+                if loss is not None:
+                    losses[r].append(loss)
+
+                reward_windows[r].append(reward)
+                avg_rewards[r].append(np.mean(reward_windows[r]))
+
+                next_states[r] = next_state
+
+            # update state đồng bộ
+            states = next_states
+            done = True # Xong 1 ep rồi
+
+        # ================= EPSILON DECAY =================
+        for agent in agents:
+            agent.eps = max(agent.eps_end, agent.eps * agent.eps_decay)
+        
+
+    return avg_rewards, losses
 
 
 

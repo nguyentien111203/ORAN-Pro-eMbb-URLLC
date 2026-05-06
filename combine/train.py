@@ -97,21 +97,20 @@ def alternating_training(num_rus, embb_envs, urllc_envs, embb_dqn_agents,
                   for b in range(len(frame_env.RUs[r].bwps))] for r in range(num_rus)]
 
     # Train DQN ở từng RU
-    for r in range(num_rus):
-        print(f"-- Training DQN agents {r} --")
-        if len(embb_dqn_agents) != 0:
-            embb_model = train_dqn_embb(embb_envs[r], embb_dqn_agents[r], frame_env.num_slices, numepDQN, BWP_slice[r])
-            embb_models_path.append(embb_model)
-        if len(urllc_dqn_agents) != 0:
-            urllc_model = train_dqn_urllc(urllc_envs[r], urllc_dqn_agents[r], frame_env.num_slices, numepDQN, BWP_slice[r])
-            urllc_models_path.append(urllc_model)
+    rewardeMBB, rewardURLLC = [], []
+    losseseMBB, lossesURLLC = [], []
+    print(f"-- Training DQN agents --")
+    if len(embb_dqn_agents) != 0:
+        rewardeMBB, losseseMBB = train_dqn_embb(embb_envs, embb_dqn_agents, numepDQN, BWP_slice)
+    if len(urllc_dqn_agents) != 0:
+        rewardURLLC, lossesURLLC = train_dqn_urllc(urllc_envs, urllc_dqn_agents, numepDQN, BWP_slice)
 
     # Train SAC chung
     print("-- Training SAC (frame-level) --")
     sac_model_path = train_sac(frame_env, sac_agent, numepSAC)
 
     print("Training complete.")
-    return embb_models_path, urllc_models_path, sac_model_path
+    #return embb_models_path, urllc_models_path, sac_model_path
 
 
 

@@ -31,7 +31,7 @@ class MultiHeadDQN(nn.Module):
 
         # Các head riêng cho từng slice
         self.heads = nn.ModuleList([
-            nn.Linear(hidden_dim, num_urllc_ue[i]) for i in range(num_urllc)
+            nn.Linear(hidden_dim, num_bwp * num_urllc_ue[i]) for i in range(num_urllc)
         ])
 
     def forward(self, state):
@@ -46,7 +46,7 @@ class MultiHeadDQN(nn.Module):
 
         q_values_per_slice = []
         for i, head in enumerate(self.heads):
-            q_slice = head(z)  # [batch, num_ue_slice_i]
+            q_slice = head(z)  # [batch, num_bwp * num_ue_slice_i]
             # Thêm chiều num_bwp
             q_slice = q_slice.unsqueeze(1).expand(-1, self.num_bwp, -1)
             # [batch, num_bwp, num_ue_slice_i]
@@ -78,6 +78,7 @@ class MultiHeadDQNAgent:
         self.eps_decay = train_cons["eps_decay"]
         self.lr = train_cons["lr"]
         self.learn_step = 0
+        self.target_update = 2
 
         # Mạng Q chính & target (dùng cùng cấu hình)
         self.policy_net = MultiHeadDQN(
@@ -90,6 +91,11 @@ class MultiHeadDQNAgent:
         # Đồng bộ trọng số ban đầu
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
+
+        # Tính offset phục vụ cho việc tính toán
+        self.offsets = [0]
+        for n in self.num_slice_ue:
+            self.offsets.append(self.offsets[-1] + n)
 
         # Optimizer
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.lr)
@@ -185,24 +191,19 @@ class MultiHeadDQNAgent:
         q_values_per_slice = self.policy_net(state_batch)  # list [B, num_bwp, num_ue_slice_i]
 
         chosen_q_list = []
-
+        start = 0
         for i, q_slice in enumerate(q_values_per_slice):
-            # lấy đúng đoạn action của slice i
-            start = i * self.num_bwp
-            end = (i + 1) * self.num_bwp
+            start = self.num_bwp * self.offsets[i]
+            end = self.num_bwp * self.offsets[i+1]
+            act = action_batch[i][start:end]
 
-            act = action_batch[:, start:end]   # [B, num_bwp]
-
-            # gather cần index dạng [B, num_bwp, 1]
-            act = act.unsqueeze(-1)
-
-            chosen_q = q_slice.gather(2, act).squeeze(2)  # [B, num_bwp]
+            # tính Q(s,a)
+            chosen_q = (q_slice * act).sum(dim=2)   # [B, num_bwp]
 
             chosen_q_list.append(chosen_q)
 
         # [B, num_slices, num_bwp]
         chosen_q = torch.stack(chosen_q_list, dim=1)
-
         # Q mục tiêu
         with torch.no_grad():
             next_q_values_per_slice = self.target_net(next_state_batch)
@@ -212,9 +213,8 @@ class MultiHeadDQNAgent:
                 max_next_q_list.append(max_next_q)
             max_next_q = torch.stack(max_next_q_list, dim=1)  # [B, num_urllc, num_bwp]
 
-            target_q = reward_batch.unsqueeze(1).unsqueeze(2) + \
-                    self.gamma * (1 - done_batch.unsqueeze(1).unsqueeze(2)) * max_next_q
-
+            target_q = reward_batch.unsqueeze(1) + \
+                    self.gamma * (1 - done_batch.unsqueeze(1)) * max_next_q
         # Tính loss
         loss = nn.functional.smooth_l1_loss(chosen_q, target_q)
 
