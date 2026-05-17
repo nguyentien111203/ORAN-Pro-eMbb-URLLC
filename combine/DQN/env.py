@@ -55,7 +55,7 @@ class RU_Env(gym.Env):
         self.num_urllc_ue = [len(self.urllc_slices[s].ue_set) for s in range(self.num_urllc)]
 
         # Tập số ue mỗi slice (eMBB được tính trước)
-        self.num_ue = [self.num_embb_ue, self.num_urllc_ue]
+        self.num_ue = np.concatenate([self.num_embb_ue, self.num_urllc_ue])
         
         # [QoS_ratios, averSinr, minSinr, 4_costs, psi]
         self.state_dim = 2 * sum(self.num_embb_ue) + 3 * sum(self.num_urllc_ue) + 5  
@@ -69,13 +69,13 @@ class RU_Env(gym.Env):
         self.action_space = spaces.MultiDiscrete(max(max(self.num_urllc_ue), max(self.num_embb_ue)) * self.RU.B_r)
 
         # Tính toán số bit mà các UE urllc nhận được
-        self.numBit = [[0 for _ in range(len(self.num_urllc_ue[s]))] for s in range(self.num_urllc)]  
+        self.numBit = [[0 for _ in range(self.num_urllc_ue[s])] for s in range(self.num_urllc)]  
         
         # Dict các latency của các slice URLLC 
-        self.URLLC_Latency = [[0 for _ in range(len(self.num_urllc_ue[s]))] for s in range(self.num_urllc)]  
+        self.URLLC_Latency = [[0 for _ in range(self.num_urllc_ue[s])] for s in range(self.num_urllc)]  
 
         # Throughput các UE eMBB
-        self.eMBB_Thr = [[0 for _ in range(len(self.num_embb_ue[s]))] for s in range(self.num_embb)]
+        self.eMBB_Thr = np.array([[0 for _ in range(self.num_embb_ue[s])] for s in range(self.num_embb)], np.float64)
 
         # List các số PRB của từng BWP phân bổ cho các UE
         self.alloc = [[[0 for u in range(self.num_ue[i])] for b in range(len(self.RU.bwps))] for i in range(self.num_slices)]
@@ -118,7 +118,10 @@ class RU_Env(gym.Env):
         stab : độ ổn định trong quyết định
         """
         # Bẻ thẳng averUE, minUE
-        averUE_flat = np.array([averUE[s][u] for s in range(self.num_urllc) for u in range(self.num_urllc_ue[s])])
+        fakecFrag = 1
+        if cFrag != 0:
+            fakecFrag = cFrag
+        averUE_flat = np.array([averUE[s][u] for s in range(self.num_slices) for u in range(self.num_ue[s])])
         minUE_flat = np.array([minUE[s][u] for s in range(self.num_urllc) for u in range(self.num_urllc_ue[s])])
         state = np.concatenate((
             urllc_rate,
@@ -127,7 +130,7 @@ class RU_Env(gym.Env):
             minUE_flat,
             np.array([
                 self.scale_max[0]/cEne ,
-                self.scale_max[1]/cFrag,
+                self.scale_max[1]/fakecFrag,
                 self.scale_max[2]/cSwit,
                 self.scale_max[3]/cGB,
                 stab
@@ -137,10 +140,13 @@ class RU_Env(gym.Env):
         return state.astype(np.float32)
 
 
-    def select_action(self):
-        """Nếu có DQN agent thì dùng policy của nó, nếu không thì random."""
+    def select_action(self, state, BWP_slice):
+        """
+        Nếu có DQN agent thì dùng policy của nó, nếu không thì random.
+        BWP_slice : phân bổ PRB từ từng BWP về slice
+        """
         if self.dqn_agent is not None:
-            return self.dqn_agent.select_action(self.state, self.BWP_slice)
+            return self.dqn_agent.select_action(state, BWP_slice)
         return self.action_space.sample()
 
 
@@ -149,11 +155,11 @@ class RU_Env(gym.Env):
         Reset lại ma trận phân bổ khi xét đến slot mới (reset lại số bit mà mỗi UE nhận, 
         và ghi đè lên các giá trị SINR, latency và số PRB được phân bổ (alloc))
         """
-        self.numBit = [[0 for _ in range(len(self.num_urllc_ue[s]))] for s in range(self.num_urllc)]  
+        self.numBit = [[0 for _ in range(self.num_urllc_ue[s])] for s in range(self.num_urllc)]  
         
-        self.URLLC_Latency = [[0 for _ in range(len(self.num_urllc_ue[s]))] for s in range(self.num_urllc)]  
+        self.URLLC_Latency = [[0 for _ in range(self.num_urllc_ue[s])] for s in range(self.num_urllc)]  
 
-        self.eMBB_Thr = [[0 for _ in range(len(self.num_embb_ue[s]))] for s in range(self.num_embb)]
+        self.eMBB_Thr = [[0 for _ in range(self.num_embb_ue[s])] for s in range(self.num_embb)]
 
 
     def computeOutput(self, action):
@@ -171,9 +177,12 @@ class RU_Env(gym.Env):
         self.calculateThroughput()
 
         flatBit = np.array([self.numBit[s][u] for s in range(self.num_urllc) 
-                            for u in range(len(self.slices[s].ue_set))], np.int32)
+                            for u in range(len(self.urllc_slices[s].ue_set))], np.float64)
+        
+        flatThr = np.array([self.eMBB_Thr[s][u] for s in range(self.num_embb) 
+                            for u in range(len(self.embb_slices[s].ue_set))], np.float64)
 
-        return flatBit, self.eMBB_Thr
+        return flatBit, flatThr
 
 
     def step(self, totalLatRate, totalThrRate):
@@ -204,10 +213,12 @@ class RU_Env(gym.Env):
         averUE = self.calculateAverUE()
         minUE = self.calculateMinUE()
 
+        # Tạm
+        if cFrag == 0 :
+            cFrag = self.scale_max[1]
 
         reward = self.w_reward["lat"] * sum(totalLatRate[u] for u in range(len(totalLatRate))) + \
-                self.w_reward["thr"] * sum(totalThrRate[s][u] for s in range(self.num_embb) 
-                                             for u in range(len(self.slices[s].ue_set))) + \
+                self.w_reward["thr"] * sum(totalThrRate[u] for u in range(len(totalThrRate))) + \
                 self.w_reward["cost"] * ((self.scale_max[0]/cEne) + (self.scale_max[1]/cFrag) + \
                                          (self.scale_max[2]/cSwit) + (self.scale_max[3]/cGB)) + stab
 
@@ -264,7 +275,7 @@ class RU_Env(gym.Env):
         for i in range(self.num_urllc):
             for u in range(self.num_urllc_ue[i]):
                 for b in range(len(self.RU.bwps)):
-                    self.numBit[i][u] += self.RU.bwps[b].time * self.alloc[i][b][u] * np.log2(1 + self.snr[i][b][u])
+                    self.numBit[i][u] += self.RU.bwps[b].time * self.alloc[i+self.num_embb][b][u] * np.log2(1 + self.snr[i+self.num_embb][b][u])
 
 
     def calculateThroughput(self):
@@ -272,7 +283,7 @@ class RU_Env(gym.Env):
         Tính toán throughput của eMBBs
         """
         for i in range(self.num_embb):
-            for u in range(len(self.num_embb_ue[i])):
+            for u in range(self.num_embb_ue[i]):
                 for b in range(len(self.RU.bwps)):
                     self.eMBB_Thr[i][u] += self.alloc[i][b][u] * self.RU.bwps[b].bandwidth * \
                                            np.log2(1 + self.snr[i][b][u])
@@ -362,8 +373,8 @@ class RU_Env(gym.Env):
         Tính toán hiệu suất phổ, tính theo tỷ lệ SINR trung bình trên 1 UE
         """
         averUE = [[0 for _ in range(self.num_ue[s])] for s in range(self.num_slices)]
-        for s in range(self.num_urllc):
-            for u in range(self.num_urllc_ue[s]):
+        for s in range(self.num_slices):
+            for u in range(self.num_ue[s]):
                 averSINR = np.average([self.snr[s][b][u] for b in range(len(self.RU.bwps))])
                 averUE[s][u] = np.log2(1 + averSINR)
         return averUE
@@ -376,7 +387,7 @@ class RU_Env(gym.Env):
         minUE = [[0 for _ in range(self.num_urllc_ue[s])] for s in range(self.num_urllc)]
         for s in range(self.num_urllc):
             for u in range(self.num_urllc_ue[s]):
-                minSINR = np.min([self.snr[s][b][u] for b in range(len(self.RU.bwps))])
+                minSINR = np.min([self.snr[s + self.num_embb][b][u] for b in range(len(self.RU.bwps))])
                 minUE[s][u] = np.log2(1 + minSINR)
         return minUE
 

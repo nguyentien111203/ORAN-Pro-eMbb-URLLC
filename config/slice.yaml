@@ -4,6 +4,6 @@ slices:
     ue_set: "[ue_0, ue_1]" # Lấy là tập id của các UE
     
 
-  - id: slice_urllc_1
-    type: "URLLC"
+  - id: slice_embb_0
+    type: "eMBB"
     ue_set: "[ue_2]"

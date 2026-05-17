@@ -5,7 +5,7 @@ import torch
 
 
 class FrameEnv(gym.Env):
-    def __init__(self, RUs, RU_urllc_envs, RU_embb_envs, urllc_slices, embb_slices, H, w_reward, 
+    def __init__(self, RUs, RU_envs, urllc_slices, embb_slices, H, w_reward, 
                  scale_max, frame_slots=10):
         """
         slot_envs: m
@@ -13,8 +13,7 @@ class FrameEnv(gym.Env):
         
         super().__init__()
         self.RUs = RUs
-        self.RU_urllc_envs = RU_urllc_envs
-        self.RU_embb_envs = RU_embb_envs
+        self.RU_envs = RU_envs
         self.urllc_slices = urllc_slices
         self.embb_slices = embb_slices
         self.H = H
@@ -48,73 +47,91 @@ class FrameEnv(gym.Env):
         # Ma trận phân bổ số PRB từng BWP về từng slice (để chỉ số của slice urllc trước, sau đó mới đến slice embb)
         self.BWP_slice = [[[0 for _ in range(len(self.RUs[r].bwps))] for _ in range(self.num_slices)] for r in range(self.num_rus)]
         self.last_BWP_slice = None
+
+        self.pac = np.array([ue.pac for s in range(self.num_urllc) 
+                        for ue in self.RU_envs[0].urllc_slices[s].ue_set])
+
+        self.lat_target = np.array([ue.lat for s in range(self.num_urllc) 
+                               for ue in self.RU_envs[0].urllc_slices[s].ue_set])
+
+        self.thr_min = np.array([ue.thr for s in range(self.num_embb) 
+                            for ue in self.RU_envs[0].embb_slices[s].ue_set])
         
+        self.URLLC_frame = []
+        self.eMBB_frame = []
+        for slot in range(self.frame_slots): 
+            self.URLLC_frame.append([])
+            self.eMBB_frame.append([])
+            for s in range(len(self.urllc_slices)):
+                self.URLLC_frame[slot].append(np.zeros(len(self.urllc_slices[s].ue_set), np.float64))
+            for s in range(len(self.embb_slices)):
+                self.eMBB_frame[slot].append(np.zeros(len(self.embb_slices[s].ue_set), np.float64))
+
+        # Tính toán các chi phí trên từng frame
+        self.costEne = np.zeros(self.frame_slots)
+        self.costFrag = np.zeros(self.frame_slots)
+        self.costSwit = np.zeros(self.frame_slots)
+        self.costGB = np.zeros(self.frame_slots)
+
 
     def reset(self):
         """
-        Reset lại môi trường ở từng frame 
+        Reset lại môi trường ở từng frame cũng như chi phí, throungput và latency
         """
-        for env in self.RU_embb_envs:
+        for env in self.RU_envs:
             env.reset()
+        
+        for slot in range(self.frame_slots):
+            for s in range(len(self.urllc_slices)):
+                self.URLLC_frame[slot][s] = np.zeros(len(self.urllc_slices[s].ue_set))
+            for s in range(len(self.embb_slices)):
+                self.eMBB_frame[slot][s] = np.zeros(len(self.embb_slices[s].ue_set))
 
-        for env in self.RU_urllc_envs:
-            env.reset()
+        # Tính toán các chi phí trên từng frame
+        self.costEne = np.zeros(self.frame_slots)
+        self.costFrag = np.zeros(self.frame_slots)
+        self.costSwit = np.zeros(self.frame_slots)
+        self.costGB = np.zeros(self.frame_slots)
 
         self.slot_count = 0
 
 
     def step(self, action):
         self.resetAlloc()
-        
-        # Tính toán throughput và latency trên frame của các UE
-        URLLC_frame = []
-        eMBB_frame = []
-        if len(self.urllc_slices) != 0: 
-            for s in range(len(self.urllc_slices)):
-                URLLC_frame.append(np.zeros(len(self.urllc_slices[s].ue_set)))
-        if len(self.embb_slices) != 0:
-            for s in range(len(self.embb_slices)):
-                eMBB_frame.append(np.zeros(len(self.embb_slices[s].ue_set)))
-
-        # Tính toán các chi phí trên từng frame
-        costEne = np.zeros(self.frame_slots)
-        costFrag = np.zeros(self.frame_slots)
-        costSwit = np.zeros(self.frame_slots)
-        costGB = np.zeros(self.frame_slots)
-        
+        self.reset()
+        DQNstate = [np.zeros(self.RU_envs[0].state_dim) * self.num_rus]
         for slot_index in range(self.frame_slots):
-            
+            numBits = np.array([0 for s in range(self.num_urllc) 
+                                for ue in self.RU_envs[0].urllc_slices[s].ue_set], np.float64)
             # Cập nhật và lấy thông tin từ các RU
-            for r, (Eenv, Uenv) in enumerate(zip(self.RU_embb_envs, self.RU_urllc_envs)):
+            for r, env in enumerate(self.RU_envs):
                 # Cập nhật H, thực hiện hành động và tính toán throughput, latency và 
                 # các chi phí dựa trên action của SAC
-                if self.num_embb != 0:
-                    Eenv.update_H(self.H[self.num_urllc : self.num_slices])
-                    Eaction = Eenv.select_action(action[r])
-                    _, _, Einfo = Eenv.step(Eaction)
+                env.update_H(self.H[slot_index][r])
+                DQNaction = env.select_action(DQNstate[r], action[r])
 
-                    for s in range(len(self.embb_slices)):
-                        for e in range(len(self.embb_slices[s])):
-                            eMBB_frame[s][e] += Einfo["Thr"][s][e]
+                # computeOutput trả numpy array (slice x ue)
+                ruBits, ruThr = env.computeOutput(DQNaction)
 
-                    costEne[slot_index] += Einfo["costE"]
-                    costFrag[slot_index] += Einfo["costF"]
-                    costSwit[slot_index] += Einfo["costS"]
-                    costGB[slot_index] += Einfo["costGB"]
+                # Tính toán thr và latency
+                numBits += ruBits
+                self.eMBB_frame[slot_index] += ruThr
 
-                if self.num_urllc != 0:
-                    Uenv.update_H(self.H[:self.num_urllc])
-                    Uaction = Uenv.select_action(action[r])
-                    _, _, Uinfo = Uenv.step(Uaction)
+            self.URLLC_frame[slot_index] = self.pac / numBits
+            embb_rate = self.eMBB_frame[slot_index] / self.thr_min
+            urllc_rate = self.URLLC_frame[slot_index] / self.lat_target
+            
+            # Áp action vào tính toán và 
+            for r, env in enumerate(self.RU_envs):
+                DQNstate[r], _, _, info = env.step(urllc_rate, embb_rate)
 
-                    for s in range(len(self.urllc_slices)):
-                        for u in range(len(self.urllc_slices[s])):
-                            URLLC_frame += Uinfo["lat"][s][u] 
+                self.costEne[slot_index] += info["costE"]
+                self.costFrag[slot_index] += info["costF"]
+                self.costSwit[slot_index] += info["costS"]
+                self.costGB[slot_index] += info["costGB"]
 
-                    costEne[slot_index] += Uinfo["costE"]
-                    costFrag[slot_index] += Uinfo["costF"]
-                    costSwit[slot_index] += Uinfo["costS"]
-                    costGB[slot_index] += Uinfo["costGB"]
+            
+
 
         # Tính trung bình trong 1 frame
         if self.num_embb != 0:
@@ -131,23 +148,23 @@ class FrameEnv(gym.Env):
         # reward
         reward = (self.w_reward["thr"] *  embb_avg 
                 + self.w_reward["lat"] *  urllc_avg
-                + self.w_reward["cost"] * (4 - (np.sum(costEne) / (self.scale_max[0] * self.frame_slots))  \
-                                        - (np.sum(costFrag) / (self.scale_max[1] * self.frame_slots)) \
-                                        - (np.sum(costSwit) / (self.scale_max[2] * self.frame_slots)) \
-                                        - (np.sum(costGB) / (self.scale_max[3] * self.frame_slots))))
+                + self.w_reward["cost"] * (4 - (np.sum(self.costEne) / (self.scale_max[0] * self.frame_slots))  \
+                                        - (np.sum(self.costFrag) / (self.scale_max[1] * self.frame_slots)) \
+                                        - (np.sum(self.costSwit) / (self.scale_max[2] * self.frame_slots)) \
+                                        - (np.sum(self.costGB) / (self.scale_max[3] * self.frame_slots))))
 
         info = {
             "thr": eMBB_frame,
             "lat": URLLC_frame,
-            "costE": costEne,
-            "costF": costFrag,
-            "costS": costSwit,
-            "costGB": costGB
+            "costE": self.costEne,
+            "costF": self.costFrag,
+            "costS": self.costSwit,
+            "costGB": self.costGB
         }
 
         # Reset lại phân bổ
         self.last_BWP_slice = self.BWP_slice
-        next_state = self.get_state(eMBB_frame, URLLC_frame, costEne, costFrag, costSwit, costGB)
+        next_state = self.get_state(eMBB_frame, URLLC_frame, self.costEne, self.costFrag, self.costSwit, self.costGB)
         done = self.slot_count == self.frame_slots
         return next_state, reward, info, done
     

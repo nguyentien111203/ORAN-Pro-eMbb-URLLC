@@ -10,8 +10,7 @@ ues:
     lat: 1.0 # ms
     pac: 5 # byte
 
-  # Các UE thuộc slice_urllc_1
-  - id: ue_0
-    slice_id: slice_urllc_1
-    lat: 1.0 # ms
-    pac: 5 # byte
+  # Các UE thuộc slice_embb_0
+  - id: ue_2
+    slice_id: slice_embb_0
+    thr: 5 # Mbps

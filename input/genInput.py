@@ -282,9 +282,4 @@ def generate_h_matrix(num_rus, num_slots, num_slices,
         
     return H
 
-# --- Ví dụ cách bạn tách H để đưa vào DQN từng loại ---
-# H_matrix = generate_h_matrix(...)
 
-# Lấy H cho một RU 'r' tại slot 't':
-# H_urllc = H[r][t][:num_urllc]            # List chứa gain của các slice URLLC
-# H_embb  = H[r][t][num_urllc:num_slices]  # List chứa gain của các slice eMBB

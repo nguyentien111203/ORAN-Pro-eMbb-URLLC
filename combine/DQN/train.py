@@ -28,7 +28,7 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
     thr_min = np.array([ue.thr for s in range(num_embb) for ue in envs[0].embb_slices[s].ue_set])
 
     # ================= TRAIN =================
-    for ep in trange(num_episodes, desc="Training DQN URLLC"):
+    for ep in trange(num_episodes, desc="Training DQNs"):
 
         done = False
 
@@ -42,12 +42,14 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
 
             # ================= PHASE 2: COMPUTE OUTPUT =================
             # numBits: (slice, ue)
-            numBits = np.array([0 for s in range(num_urllc) for ue in envs[0].urllc_slices[s].ue_set], np.int32)
-            totalThr = np.array([0 for s in range(num_embb) for ue in envs[0].embb_slices[s].ue_set], np.int32)
+            numBits = np.array([0 for s in range(num_urllc) for ue in envs[0].urllc_slices[s].ue_set], np.float64)
+            totalThr = np.array([0 for s in range(num_embb) for ue in envs[0].embb_slices[s].ue_set], np.float64)
 
             for r in range(num_ru):
                 # computeOutput trả numpy array (slice x ue)
-                numBits, totalThr += envs[r].computeOutput(actions[r])
+                ruBits, ruThr = envs[r].computeOutput(actions[r])
+                numBits += ruBits
+                totalThr += ruThr
 
             # ================= PHASE 3: GLOBAL METRIC =================
             urllc_lat = pac / numBits
