@@ -118,9 +118,6 @@ class RU_Env(gym.Env):
         stab : độ ổn định trong quyết định
         """
         # Bẻ thẳng averUE, minUE
-        fakecFrag = 1
-        if cFrag != 0:
-            fakecFrag = cFrag
         averUE_flat = np.array([averUE[s][u] for s in range(self.num_slices) for u in range(self.num_ue[s])])
         minUE_flat = np.array([minUE[s][u] for s in range(self.num_urllc) for u in range(self.num_urllc_ue[s])])
         state = np.concatenate((
@@ -129,10 +126,10 @@ class RU_Env(gym.Env):
             averUE_flat,
             minUE_flat,
             np.array([
-                self.scale_max[0]/cEne ,
-                self.scale_max[1]/fakecFrag,
-                self.scale_max[2]/cSwit,
-                self.scale_max[3]/cGB,
+                cEne/self.scale_max[0],
+                cFrag/self.scale_max[1],
+                cSwit/self.scale_max[2],
+                cGB/self.scale_max[3],
                 stab
             ])
         ))
@@ -213,14 +210,16 @@ class RU_Env(gym.Env):
         averUE = self.calculateAverUE()
         minUE = self.calculateMinUE()
 
-        # Tạm
-        if cFrag == 0 :
-            cFrag = self.scale_max[1]
+        lat_soft = 1 / (totalLatRate + 1)
+        thr_soft = totalThrRate / (totalThrRate + 1)
 
-        reward = self.w_reward["lat"] * sum(totalLatRate[u] for u in range(len(totalLatRate))) + \
-                self.w_reward["thr"] * sum(totalThrRate[u] for u in range(len(totalThrRate))) + \
-                self.w_reward["cost"] * ((self.scale_max[0]/cEne) + (self.scale_max[1]/cFrag) + \
-                                         (self.scale_max[2]/cSwit) + (self.scale_max[3]/cGB)) + stab
+        lat_term = np.mean(lat_soft)
+        thr_term = np.mean(thr_soft)
+
+        reward = self.w_reward["lat"] * lat_term + \
+                self.w_reward["thr"] * thr_term + \
+                self.w_reward["cost"] * (1/4) * (4 - (cEne/self.scale_max[0]) - (cFrag/self.scale_max[1]) - \
+                                         (cSwit/self.scale_max[2]) - (cGB/self.scale_max[3])) + stab
 
         # Kiểm tra xem đã sang frame mới chưa
         done = self.index_subframe > self.frame_slots

@@ -9,81 +9,104 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
     num_embb = envs[0].num_embb
     num_urllc = envs[0].num_urllc
 
-    # --- init ---
-    states = [np.zeros(envs[0].state_dim) for r in range(num_ru)]
+    states = [np.zeros(envs[0].state_dim) for _ in range(num_ru)]
 
     losses = [[] for _ in range(num_ru)]
     avg_rewards = [[] for _ in range(num_ru)]
-    reward_windows = [deque(maxlen=10) for _ in range(num_ru)]
+    reward_windows = [deque(maxlen=50) for _ in range(num_ru)]  # tăng window
 
-    # --- static info (vector hóa trước) ---
-    offsets = [0]
-    for n in envs[0].num_ue:
-        offsets.append(offsets[-1] + n)
+    # static info
+    pac = np.array([
+        ue.pac
+        for s in range(num_urllc)
+        for ue in envs[0].urllc_slices[s].ue_set
+    ])
 
-    pac = np.array([ue.pac for s in range(num_urllc) for ue in envs[0].urllc_slices[s].ue_set])
+    lat_target = np.array([
+        ue.lat
+        for s in range(num_urllc)
+        for ue in envs[0].urllc_slices[s].ue_set
+    ])
 
-    lat_target = np.array([ue.lat for s in range(num_urllc)for ue in envs[0].urllc_slices[s].ue_set])
-
-    thr_min = np.array([ue.thr for s in range(num_embb) for ue in envs[0].embb_slices[s].ue_set])
+    thr_min = np.array([
+        ue.thr
+        for s in range(num_embb)
+        for ue in envs[0].embb_slices[s].ue_set
+    ])
 
     # ================= TRAIN =================
     for ep in trange(num_episodes, desc="Training DQNs"):
 
         done = False
+        step = 0
+        max_steps = 10   # IMPORTANT: tạo episode thật
 
         while not done:
 
-            # ================= PHASE 1: ACTION =================
+            # ================= ACTION =================
             actions = [
                 agents[r].select_action(states[r], initBWP_slice[r])
                 for r in range(num_ru)
             ]
 
-            # ================= PHASE 2: COMPUTE OUTPUT =================
-            # numBits: (slice, ue)
-            numBits = np.array([0 for s in range(num_urllc) for ue in envs[0].urllc_slices[s].ue_set], np.float64)
-            totalThr = np.array([0 for s in range(num_embb) for ue in envs[0].embb_slices[s].ue_set], np.float64)
+            # ================= OUTPUT =================
+            numBits = np.array([
+                1e-7
+                for s in range(num_urllc)
+                for ue in envs[0].urllc_slices[s].ue_set
+            ], np.float64)
+
+            totalThr = np.zeros_like(thr_min, dtype=np.float64)
 
             for r in range(num_ru):
-                # computeOutput trả numpy array (slice x ue)
                 ruBits, ruThr = envs[r].computeOutput(actions[r])
                 numBits += ruBits
                 totalThr += ruThr
 
-            # ================= PHASE 3: GLOBAL METRIC =================
-            urllc_lat = pac / numBits
-            urllc_rate = lat_target / urllc_lat 
-            embb_rate = totalThr / thr_min
+            # ================= METRICS =================
+            urllc_lat = pac / (numBits + 1e-8)
 
-            # ================= PHASE 4: UPDATE + TRAIN =================
+            urllc_rate = lat_target / (urllc_lat + 1e-8)
+            embb_rate = totalThr / (thr_min + 1e-8)
+
+            # ================= STEP =================
             next_states = [None] * num_ru
 
             for r in range(num_ru):
-                next_state, reward, done, _ = envs[r].step(urllc_rate, embb_rate)
+
+                next_state, reward, done_env, _ = envs[r].step(
+                    urllc_rate, embb_rate
+                )
+
 
                 agents[r].store_transition(
-                    states[r], actions[r], reward, next_state, done
+                    states[r],
+                    actions[r],
+                    reward,
+                    next_state,
+                    done_env
                 )
 
                 loss = agents[r].optimize_model()
-
                 if loss is not None:
                     losses[r].append(loss)
 
                 reward_windows[r].append(reward)
-                avg_rewards[r].append(np.mean(reward_windows[r]))
 
                 next_states[r] = next_state
 
-            # update state đồng bộ
             states = next_states
-            done = True # Xong 1 ep rồi
+
+            step += 1
+            done = (step >= max_steps)   # FIXED EPISODE LOGIC
+
+        for r in range(num_ru):
+            ep_reward = np.mean(reward_windows[r])
+            avg_rewards[r].append(ep_reward)
 
         # ================= EPSILON DECAY =================
         for agent in agents:
             agent.eps = max(agent.eps_end, agent.eps * agent.eps_decay)
-        
 
     return avg_rewards, losses
 

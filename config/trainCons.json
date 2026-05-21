@@ -9,7 +9,7 @@
         "eps_start" : 1.0,
         "eps_end" : 0.1,
         "eps_decay" : 0.7,
-        "dqn_train_episodes": 100
+        "dqn_train_episodes": 300
     },
 
     "forSAC" : {

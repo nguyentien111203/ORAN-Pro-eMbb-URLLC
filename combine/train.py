@@ -8,7 +8,9 @@ from combine.SAC.SACagent import SACAgent
 from combine.DQN.env import RU_Env
 from combine.SAC.FrameEnv import FrameEnv
 from combine.DQN.train import train_dqn
-from combine.SAC.train_SAC import train_sac
+from combine.SAC.train_SAC import train_sac 
+from combine.utils.plotDQN import plot_DQNtraining_curves, plot_DQNlosstraining_curves
+from combine.utils.pltSAC import plot_SACactorlosstraining_curves, plot_SACcriticlosstraining_curves, plot_SACtraining_curves
 
 
 def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, inter_factor, N0,
@@ -87,10 +89,15 @@ def alternating_training(num_rus, envs, agents,
     print(f"-- Training DQN agents --")
     
     reward, losses = train_dqn(envs, agents, numepDQN, BWP_slice)
+    plot_DQNtraining_curves(reward[0], 0, envs[0].num_slices, envs[0].num_urllc)
+    plot_DQNlosstraining_curves(losses[0], 0, envs[0].num_slices, envs[0].num_urllc)
 
     # Train SAC chung
     print("-- Training SAC (frame-level) --")
-    sac_model_path = train_sac(frame_env, sac_agent, numepSAC)
+    avg_rewards, actor_losses, critic_losses, sac_model_path = train_sac(frame_env, sac_agent, numepSAC)
+    plot_SACtraining_curves(avg_rewards, num_rus, envs[0].num_slices, envs[0].num_urllc)
+    plot_SACactorlosstraining_curves(actor_losses, num_rus, envs[0].num_slices, envs[0].num_urllc)
+    plot_SACcriticlosstraining_curves(critic_losses, num_rus, envs[0].num_slices, envs[0].num_urllc)
 
     print("Training complete.")
     #return embb_models_path, urllc_models_path, sac_model_path

@@ -114,19 +114,20 @@ class MultiHeadDQNAgent:
             for _ in range(num_slices)
         ]
 
-        state_t = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        state_t = torch.as_tensor(
+            state, dtype=torch.float32, device=self.device
+        ).unsqueeze(0)
 
         with torch.no_grad():
             q_values = self.policy_net(state_t)
-            # q_values là list: [slice0_tensor, slice1_tensor, ...]
+            # list: [slice][1][BWP][UE]
 
         for s_idx in range(num_slices):
 
             num_ues = self.num_slice_ue[s_idx]
 
-            # bỏ batch dim
             q_slice_all_bwp = q_values[s_idx].squeeze(0)
-            # shape: [num_bwps, max_ues]
+            # [num_bwps, num_ues]
 
             for bwp_idx in range(num_bwps):
 
@@ -136,17 +137,35 @@ class MultiHeadDQNAgent:
                     all_allocations[s_idx][bwp_idx] = np.zeros(num_ues, dtype=int)
                     continue
 
-                # lấy Q cho đúng BWP + UE
-                q_slice = q_slice_all_bwp[bwp_idx, :num_ues]
+                q_slice = q_slice_all_bwp[bwp_idx, :num_ues].cpu().numpy()
 
-                # ---- epsilon-greedy ----
+                # ---- ε-greedy ----
                 if np.random.rand() < self.eps:
-                    probs = np.ones(num_ues) / num_ues
-                else:
-                    probs = torch.softmax(q_slice, dim=-1).cpu().numpy()
 
-                # ---- phân bổ PRB ----
-                prb_alloc = np.random.multinomial(budget, probs)
+                    probs = np.ones(num_ues) / num_ues
+
+                else:
+                    # shift tránh âm
+                    q_shift = q_slice - np.min(q_slice)
+
+                    # tránh all-zero
+                    probs = q_shift + 1e-8
+
+                    probs = probs / np.sum(probs)
+
+                # ---- chọn UE cho từng PRB ----
+                selected_ues = np.random.choice(
+                    num_ues,
+                    size=budget,
+                    replace=True,
+                    p=probs
+                )
+
+                # ---- allocation vector nhanh hơn ----
+                prb_alloc = np.bincount(
+                    selected_ues,
+                    minlength=num_ues
+                )
 
                 all_allocations[s_idx][bwp_idx] = prb_alloc
 
