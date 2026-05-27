@@ -1,0 +1,2 @@
+num_RUs,num_slices,num_URLLC,num_PRB_per_RU,Pmax_mW,avg_thr_ml,avg_sla_embb_ml,avg_sla_urllc_ml,avg_power_ml,util_ml,avg_thr_flat,avg_sla_embb_flat,avg_sla_urllc_flat,avg_power_flat,util_flat
+

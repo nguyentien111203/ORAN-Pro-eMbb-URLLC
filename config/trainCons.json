@@ -1,0 +1,27 @@
+{
+    "forDQN": {
+            "comment": "Chinh learning_rate, lr, gamma, eps, train_episodes",   
+        "device": "cpu",
+        "lr": 1e-4,
+        "gamma": 0.99,
+        "batch_size": 128,
+        "eps_start": 1.0,  
+        "eps_end": 0.05,     
+        "eps_decay": 0.997,
+        "dqn_train_episodes": 500
+    },
+    "forSAC": {
+            "comment": "Chinh gamma, train_episodes, lr, tau, ..._lr, khong chinh action_...",
+        "action_scale": 1.0,
+        "action_bias": 0.0,
+        "device": "cpu",                 
+        "gamma": 0.99,
+        "sac_train_episodes": 500,
+        "lr": 3e-4,
+        "tau": 0.005,
+        "alpha": 0.2,
+        "actor_lr": 1e-4,
+        "critic_lr": 1e-4,
+        "alpha_lr": 3e-4
+    }
+}

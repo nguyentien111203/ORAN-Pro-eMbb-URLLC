@@ -1,0 +1,13 @@
+{
+    "BASE_BW_MHz" : 0.18,
+    "BASE_TIME_ms" : 1,  
+    "N0_mW_per_MHz": 3.98e-12,
+    "T_slot": 0.001,
+    "num_slot_per_frame": 10,
+    "inter_RU" : 2,
+    "inter_factor": 0.03,
+    "w_reward": {"thr": 1.0, "lat": 1.0, "cost": 0.05},  
+    "cost_switch" : 0.3,
+    "cost_gb" : 2,
+    "frame_slots" : 10
+}

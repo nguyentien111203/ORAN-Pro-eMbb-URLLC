@@ -1,0 +1,23 @@
+# Resource Allocation with Multi-BWP per Slice
+Đây là repository cho bài toán phân bổ tài nguyên trong hệ thống, với mỗi slice có thể sử dụng nhiều BWP. Cấu trúc thư mục được tổ chức như sau:
+
+## Cấu trúc thư mục
+- input/ : Chứa các file đầu vào để mô phỏng và chạy bài toán.
+- output/ : Lưu trữ kết quả đầu ra. Các kết quả này sẽ được dùng để so sánh và phục vụ viết báo cáo sau này.
+- system/ : Định nghĩa các class cần thiết cho hệ thống: RU, slice, UE.
+- Gain/ : Lưu trữ các file chứa gain (H) phục vụ mô phỏng và so sánh thuật toán.
+- config/ : Chứa các file cấu hình hằng số hệ thống:
+  + config.csv: cấu hình chung về môi trường (số RU, số BWP, số UE mỗi slice, …).
+  + cons.json: cấu hình hằng số hệ thống (baseband, thời gian mỗi slot cơ bản, N0, …).
+  + trainCons.json: cấu hình hằng số cho quá trình train agent (num_episodes cho mỗi mô hình, …).
+- combine/ : Lưu trữ các mô hình DQN, SAC:
+  + common/: các class dùng chung (MLP, GaussianPolicy, DeepQNeuralNetwork).
+  + DQN_eMBB/, DQN_URLLC/: các file cho agent DQN_eMBB và URLLC.
+  + SAC/: mô hình SAC.
+  + utils/: các hàm hỗ trợ viết báo cáo (ví dụ: vẽ hình train).
+  + train.py: pipeline để train mô hình chung.
+  + allocate.py: các hàm chạy pipeline và theo dõi thông số.
+
+## Ghi chú
+Nếu có thắc mắc, vui lòng liên hệ Tiến để được giải đáp.
+Do hạn chế về kinh nghiệm, việc tổ chức code có thể chưa tối ưu. Rất mong nhận được góp ý chân thành để cải thiện.

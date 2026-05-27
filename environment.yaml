@@ -1,0 +1,13 @@
+name: myproject
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - numpy
+  - pandas
+  - matplotlib
+  - pytorch
+  - pip
+  - scipy
+  - gym
+
