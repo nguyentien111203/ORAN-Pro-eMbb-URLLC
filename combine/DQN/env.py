@@ -3,6 +3,7 @@ import gym
 from gym import spaces
 import numpy as np 
 from combine.common.multiagent_DQN import MultiHeadDQNAgent
+import matplotlib.pyplot as plt
 
 
 class RU_Env(gym.Env):
@@ -178,7 +179,7 @@ class RU_Env(gym.Env):
         
         flatThr = np.array([self.eMBB_Thr[s][u] for s in range(self.num_embb) 
                             for u in range(len(self.embb_slices[s].ue_set))], np.float64)
-
+        #print(action)
         return flatBit, flatThr
 
 
@@ -210,18 +211,27 @@ class RU_Env(gym.Env):
         averUE = self.calculateAverUE()
         minUE = self.calculateMinUE()
 
-        lat_soft = 1 / (totalLatRate + 1)
-        thr_soft = totalThrRate / (totalThrRate + 1)
+        k = 5
+        
+        lat_soft = 1 / (np.exp(k * (totalLatRate - 1)) + 1)
+        thr_soft = 1 / (np.exp(-k * (totalThrRate - 1)) + 1)
 
-        lat_term = np.mean(lat_soft)
-        thr_term = np.mean(thr_soft)
+        lat_term = np.sum(lat_soft)
+        thr_term = np.sum(thr_soft)
 
-        reward = self.w_reward["lat"] * lat_term + \
+        reward = 10 * (self.w_reward["lat"] * lat_term + \
                 self.w_reward["thr"] * thr_term + \
                 self.w_reward["cost"] * (1/4) * (4 - (cEne/self.scale_max[0]) - (cFrag/self.scale_max[1]) - \
-                                         (cSwit/self.scale_max[2]) - (cGB/self.scale_max[3])) + stab
-
+                                         (cSwit/self.scale_max[2]) - (cGB/self.scale_max[3])) + stab)
         # Kiểm tra xem đã sang frame mới chưa
+        #print("Something for evaluate")
+        #print(np.std(totalThrRate), " ")
+        #print(np.std(totalLatRate), " ")
+        #print(reward, "\n")
+        #print("Cost : ",cEne, " ", cFrag, " ", cSwit, " ", cGB, '\n')
+        #print("latency : ", lat_soft, '\n')
+        #print("thr : ", thr_soft, '\n')
+        #print("reward : ", reward, '\n')
         done = self.index_subframe > self.frame_slots
 
         # Đưa ra state tiếp theo và action tiếp
@@ -252,7 +262,7 @@ class RU_Env(gym.Env):
                     if self.RU.bwps[b].band_index != self.RU.bwps[bk].band_index:
                         gapIndex = np.abs(self.RU.bwps[b].band_index - self.RU.bwps[bk].band_index)
                         interBWP[u] += leakage * self.inter_factor * (1/(1+gapIndex)) \
-                            * self.RU.bwps[bk].p_each_PRB * self.BWP_slice[bk][u]
+                            * self.RU.bwps[bk].p_each_PRB * self.BWP_slice[u][bk]
         return interBWP
 
 
@@ -409,3 +419,4 @@ class RU_Env(gym.Env):
         """
         return self.alloc
 
+    

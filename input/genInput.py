@@ -229,8 +229,9 @@ def calculateScaleMax(RUs, embb_slices, urllc_slices, cost_switch, cost_gb):
     cGuardB = 0
     for r in RUs:
         cFrag += len(r.bwps)
-        maxIndex = np.argmax(r.bwps[b].band_index for b in range(len(r.bwps)))
-        minIndex = np.argmin(r.bwps[b].band_index for b in range(len(r.bwps)))
+        bidex = [r.bwps[b].band_index for b in range(len(r.bwps))]
+        maxIndex = max(bidex)
+        minIndex = min(bidex)
         gapIndex = maxIndex - minIndex
         for b in r.bwps:
             cEneMax += b.num_prb * b.p_each_PRB * b.time

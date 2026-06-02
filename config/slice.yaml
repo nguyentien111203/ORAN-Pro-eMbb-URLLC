@@ -1,9 +1,22 @@
 slices:
   - id: slice_urllc_0
     type: "URLLC"
-    ue_set: "[ue_0, ue_1]" # Lấy là tập id của các UE
-    
+    ue_set: "[ue_0, ue_1, ue_2, ue_3]" # Lấy là tập id của các UE
+  - id: slice_urllc_1
+    type: "URLLC"
+    ue_set: "[ue_4, ue_5, ue_6]" # Lấy là tập id của các UE
+  - id: slice_urllc_2
+    type: "URLLC"
+    ue_set: "[ue_7, ue_8, ue_9]" # Lấy là tập id của các UE
+  - id: slice_urllc_3
+    type: "URLLC"
+    ue_set: "[ue_10, ue_11]" # Lấy là tập id của các UE
 
   - id: slice_embb_0
     type: "eMBB"
-    ue_set: "[ue_2]"
+    ue_set: "[ue_12, ue_13, ue_14]"
+  - id: slice_embb_1
+    type: "eMBB"
+    ue_set: "[ue_15, ue_16, ue_17]"
+
+

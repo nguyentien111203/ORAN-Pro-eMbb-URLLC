@@ -1,6 +1,7 @@
 import numpy as np
 from tqdm import trange
 from collections import deque
+from combine.DQN.drawDQN import plot_rate
 
 def train_dqn(envs, agents, num_episodes, initBWP_slice):
 
@@ -14,7 +15,12 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
     losses = [[] for _ in range(num_ru)]
     avg_rewards = [[] for _ in range(num_ru)]
     reward_windows = [deque(maxlen=50) for _ in range(num_ru)]  # tăng window
-
+    rate_dict = {
+        "min_urllc": [],
+        "avg_urllc": [],
+        "min_embb": [],
+        "avg_embb": []
+    }
     # static info
     pac = np.array([
         ue.pac
@@ -48,7 +54,7 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
                 agents[r].select_action(states[r], initBWP_slice[r])
                 for r in range(num_ru)
             ]
-
+            #print("action : ", actions[0])
             # ================= OUTPUT =================
             numBits = np.array([
                 1e-7
@@ -66,11 +72,15 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
             # ================= METRICS =================
             urllc_lat = pac / (numBits + 1e-8)
 
-            urllc_rate = lat_target / (urllc_lat + 1e-8)
+            urllc_rate = urllc_lat / (lat_target + 1e-8)
             embb_rate = totalThr / (thr_min + 1e-8)
 
             # ================= STEP =================
             next_states = [None] * num_ru
+            rate_dict["avg_embb"].append(np.average(embb_rate))
+            rate_dict["avg_urllc"].append(np.average(urllc_rate))
+            rate_dict["min_embb"].append(np.min(embb_rate))
+            rate_dict["min_urllc"].append(np.min(urllc_rate))
 
             for r in range(num_ru):
 
@@ -107,6 +117,14 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
         # ================= EPSILON DECAY =================
         for agent in agents:
             agent.eps = max(agent.eps_end, agent.eps * agent.eps_decay)
+
+    plot_rate(rate_dict, "URLLC", "min")
+    plot_rate(rate_dict, "URLLC", "avg")
+    plot_rate(rate_dict, "URLLC", "gap")
+
+    plot_rate(rate_dict, "eMBB", "min")
+    plot_rate(rate_dict, "eMBB", "avg")
+    plot_rate(rate_dict, "eMBB", "gap")
 
     return avg_rewards, losses
 

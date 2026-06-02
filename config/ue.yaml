@@ -10,7 +10,77 @@ ues:
     lat: 1.0 # ms
     pac: 5 # byte
 
-  # Các UE thuộc slice_embb_0
   - id: ue_2
+    slice_id: slice_urllc_0
+    lat: 1.0 # ms
+    pac: 5 # byte
+    
+  - id: ue_3
+    slice_id: slice_urllc_0
+    lat: 1.0 # ms
+    pac: 5 # byte
+
+  - id: ue_4
+    slice_id: slice_urllc_1
+    lat: 1.0 # ms
+    pac: 5 # byte
+    
+  - id: ue_5
+    slice_id: slice_urllc_1
+    lat: 1.0 # ms
+    pac: 5 # byte
+
+  - id: ue_6
+    slice_id: slice_urllc_1
+    lat: 1.0 # ms
+    pac: 5 # byte
+    
+  - id: ue_7
+    slice_id: slice_urllc_2
+    lat: 1.0 # ms
+    pac: 5 # byte
+
+  - id: ue_8
+    slice_id: slice_urllc_2
+    lat: 1.0 # ms
+    pac: 5 # byte
+    
+  - id: ue_9
+    slice_id: slice_urllc_2
+    lat: 1.0 # ms
+    pac: 5 # byte
+
+  - id: ue_10
+    slice_id: slice_urllc_3
+    lat: 1.0 # ms
+    pac: 5 # byte
+    
+  - id: ue_11
+    slice_id: slice_urllc_3
+    lat: 1.0 # ms
+    pac: 5 # byte
+
+  # Các UE thuộc slice_embb_0
+  - id: ue_12
     slice_id: slice_embb_0
+    thr: 5 # Mbps
+
+  - id: ue_13
+    slice_id: slice_embb_0
+    thr: 5 # Mbps
+
+  - id: ue_14
+    slice_id: slice_embb_0
+    thr: 5 # Mbps
+
+  - id: ue_15
+    slice_id: slice_embb_1
+    thr: 5 # Mbps
+
+  - id: ue_16
+    slice_id: slice_embb_1
+    thr: 5 # Mbps
+
+  - id: ue_17
+    slice_id: slice_embb_1
     thr: 5 # Mbps

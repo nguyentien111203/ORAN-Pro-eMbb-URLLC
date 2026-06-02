@@ -107,7 +107,10 @@ class FrameEnv(gym.Env):
     def step(self, action):
         self.resetAlloc()
         self.reset()
-        DQNstate = [np.zeros(self.RU_envs[0].state_dim) * self.num_rus]
+        # Setup trạng thái đầu của các DQN
+        DQNstate = []
+        for r in range(self.num_rus):
+            DQNstate.append(np.zeros(self.RU_envs[0].state_dim))
 
         # Action ở đây là tỷ lệ phân bổ
         # Cần dịch từ tỷ lệ ra số PRB trước khi đưa vào select_action
@@ -162,6 +165,7 @@ class FrameEnv(gym.Env):
                 self.costGB[slot_index] += info["costGB"]
 
         # Tính trung bình trong 1 frame
+        k = 5
         eMBB_frame_avg = [[np.average([self.embb_frame_rate[slot][s][u] 
                                       for slot in range(self.frame_slots)]) \
                           for u in range(len(self.eMBB_frame[0][s]))] 
@@ -171,12 +175,12 @@ class FrameEnv(gym.Env):
                           for u in range(len(self.URLLC_frame[0][s]))]
                           for s in range(len(self.URLLC_frame[0]))] 
                           
-        eMBB_frame_soft = [[eMBB_frame_avg[s][u] / (1 + eMBB_frame_avg[s][u]) 
+        eMBB_frame_soft = [[1 / (1 + np.exp(-k * (eMBB_frame_avg[s][u] - 1))) 
                            for u in range(len(eMBB_frame_avg[s]))]
                            for s in range(len(eMBB_frame_avg))] 
                            
         
-        URLLC_frame_soft = [[1 / (1 + URLLC_frame_avg[s][u]) 
+        URLLC_frame_soft = [[1 / (1 + np.exp(k * (URLLC_frame_avg[s][u] - 1))) 
                            for u in range(len(URLLC_frame_avg[s]))]
                            for s in range(len(URLLC_frame_avg))]
                            
@@ -188,12 +192,12 @@ class FrameEnv(gym.Env):
                           for u in range(len(self.urllc_slices[s].ue_set)))
 
         # reward
-        reward = (self.w_reward["thr"] *  embb_avg 
+        reward = 10 * ((self.w_reward["thr"] *  embb_avg 
                 + self.w_reward["lat"] *  urllc_avg
-                + self.w_reward["cost"] * (4 - (np.sum(self.costEne) / (self.scale_max[0] * self.frame_slots))  \
-                                        -(np.sum(self.costFrag) / (self.scale_max[1] * self.frame_slots)) \
-                                        - (np.sum(self.costSwit) / (self.scale_max[2] * self.frame_slots)) \
-                                        - (np.sum(self.costGB) / (self.scale_max[3] * self.frame_slots))))
+                + self.w_reward["cost"] * (4 - (np.average(self.costEne) / (self.scale_max[0]))  \
+                                        -(np.average(self.costFrag) / (self.scale_max[1])) \
+                                        - (np.average(self.costSwit) / (self.scale_max[2])) \
+                                        - (np.average(self.costGB) / (self.scale_max[3])))))
 
         info = {
             "thr": eMBB_frame_avg,
