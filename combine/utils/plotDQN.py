@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 def plot_DQNtraining_curves(DQN_rewards_log, RU_index, num_slices, num_urllc):
     plt.figure(figsize=(10,4))
     plt.plot(DQN_rewards_log, label='Greedy reward', alpha=0.7)
-    plt.title(f"DQN Greedy Evaluation reward {RU_index}")
+    plt.title(f"DQN reward {RU_index}")
     plt.xlabel("Episode")
     plt.ylabel("Reward")
     plt.grid(True)

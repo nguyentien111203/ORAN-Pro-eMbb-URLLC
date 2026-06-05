@@ -3,6 +3,7 @@ import numpy as np
 from tqdm import trange
 from collections import deque
 
+
 def train_sac(env, agent, num_episodes=300, log_interval=10, update_per_step=1, batch_size=128):
     """
     Huấn luyện Soft Actor-Critic cho bài toán phân bổ công suất (Frame-level).
@@ -33,6 +34,7 @@ def train_sac(env, agent, num_episodes=300, log_interval=10, update_per_step=1, 
     last_actor_loss = torch.tensor(0.0, device=agent.device)   # <-- KHÔNG reset trong episode
     total_env_steps = 0
     debug = False
+    env.resetRateDict()
 
     for ep in trange(num_episodes, desc="Training SAC"):
         
@@ -45,7 +47,7 @@ def train_sac(env, agent, num_episodes=300, log_interval=10, update_per_step=1, 
         steps = 0
 
         while not done:
-            action = agent.select_action(state, env.last_BWP_slice)
+            action = agent.select_action(state)
             next_state, reward, done, info = env.step(action)
 
             # Save transition
@@ -96,6 +98,9 @@ def train_sac(env, agent, num_episodes=300, log_interval=10, update_per_step=1, 
         moving_avg_critic = np.mean(critic_window)
 
         avg_rewards.append(moving_avg_reward)
+
+    # Vẽ hình các thứ
+    env.drawChart()
 
     # Sau khi train xong
     sac_model_path = f"./combine/SAC/model/sac_model_{env.num_rus}_{env.num_slices}_{env.num_urllc}.pth"

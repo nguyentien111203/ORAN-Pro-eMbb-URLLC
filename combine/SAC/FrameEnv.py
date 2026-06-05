@@ -2,6 +2,7 @@ import numpy as np
 import gym
 from gym import spaces
 import torch
+from combine.SAC.drawSAC import plot_rate
 
 
 class FrameEnv(gym.Env):
@@ -46,7 +47,7 @@ class FrameEnv(gym.Env):
 
         # Ma trận phân bổ số PRB từng BWP về từng slice (để chỉ số của slice urllc trước, sau đó mới đến slice embb)
         self.BWP_slice = [[[0 for _ in range(len(self.RUs[r].bwps))] for _ in range(self.num_slices)] for r in range(self.num_rus)]
-        self.last_BWP_slice = None
+        self.last_BWP_slice = [[[0 for _ in range(len(self.RUs[r].bwps))] for _ in range(self.num_slices)] for r in range(self.num_rus)]
 
         self.pac = np.array([ue.pac for s in range(self.num_urllc) 
                         for ue in self.RU_envs[0].urllc_slices[s].ue_set])
@@ -78,7 +79,12 @@ class FrameEnv(gym.Env):
         self.costFrag = np.zeros(self.frame_slots)
         self.costSwit = np.zeros(self.frame_slots)
         self.costGB = np.zeros(self.frame_slots)
-        
+        self.rate_dict = {
+            "min_urllc": [],
+            "avg_urllc": [],
+            "min_embb": [],
+            "avg_embb": []
+        }
 
     def reset(self):
         """
@@ -135,10 +141,16 @@ class FrameEnv(gym.Env):
                 numBits += ruBits
                 Thr += ruThr
 
+
             # Kết quả dạng phẳng
             flatlatency = self.pac / numBits
             flat_urllc_rate = flatlatency / self.lat_target
             flat_embb_rate = Thr / self.thr_min
+
+            self.rate_dict["avg_embb"].append(np.average(np.average(flat_embb_rate)))
+            self.rate_dict["avg_urllc"].append(np.average(np.average(flat_urllc_rate)))
+            self.rate_dict["min_embb"].append(np.min(np.min(flat_embb_rate)))
+            self.rate_dict["min_urllc"].append(np.min(np.min(flat_urllc_rate)))
 
             # Tính toán và dịch lại cho từng frame
             offset = 0
@@ -165,7 +177,7 @@ class FrameEnv(gym.Env):
                 self.costGB[slot_index] += info["costGB"]
 
         # Tính trung bình trong 1 frame
-        k = 5
+        
         eMBB_frame_avg = [[np.average([self.embb_frame_rate[slot][s][u] 
                                       for slot in range(self.frame_slots)]) \
                           for u in range(len(self.eMBB_frame[0][s]))] 
@@ -175,12 +187,12 @@ class FrameEnv(gym.Env):
                           for u in range(len(self.URLLC_frame[0][s]))]
                           for s in range(len(self.URLLC_frame[0]))] 
                           
-        eMBB_frame_soft = [[1 / (1 + np.exp(-k * (eMBB_frame_avg[s][u] - 1))) 
+        eMBB_frame_soft = [[eMBB_frame_avg[s][u] / (1 + (eMBB_frame_avg[s][u])) 
                            for u in range(len(eMBB_frame_avg[s]))]
                            for s in range(len(eMBB_frame_avg))] 
                            
         
-        URLLC_frame_soft = [[1 / (1 + np.exp(k * (URLLC_frame_avg[s][u] - 1))) 
+        URLLC_frame_soft = [[1 / (1 + (URLLC_frame_avg[s][u])) 
                            for u in range(len(URLLC_frame_avg[s]))]
                            for s in range(len(URLLC_frame_avg))]
                            
@@ -192,7 +204,7 @@ class FrameEnv(gym.Env):
                           for u in range(len(self.urllc_slices[s].ue_set)))
 
         # reward
-        reward = 10 * ((self.w_reward["thr"] *  embb_avg 
+        reward = ((self.w_reward["thr"] *  embb_avg 
                 + self.w_reward["lat"] *  urllc_avg
                 + self.w_reward["cost"] * (4 - (np.average(self.costEne) / (self.scale_max[0]))  \
                                         -(np.average(self.costFrag) / (self.scale_max[1])) \
@@ -305,3 +317,20 @@ class FrameEnv(gym.Env):
             budget_BWP_slice.append(ru_alloc)
 
         return budget_BWP_slice
+
+    def drawChart(self):
+        plot_rate(self.rate_dict, "URLLC", "min")
+        plot_rate(self.rate_dict, "URLLC", "avg")
+        plot_rate(self.rate_dict, "URLLC", "gap")
+
+        plot_rate(self.rate_dict, "eMBB", "min")
+        plot_rate(self.rate_dict, "eMBB", "avg")
+        plot_rate(self.rate_dict, "eMBB", "gap")
+
+    def resetRateDict(self):
+        self.rate_dict = {
+            "min_urllc": [],
+            "avg_urllc": [],
+            "min_embb": [],
+            "avg_embb": []
+        }

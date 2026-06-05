@@ -7,9 +7,9 @@
         "gamma" : 0.99,
         "batch_size" : 32,
         "eps_start" : 1.0,
-        "eps_end" : 0.1,
-        "eps_decay" : 0.99,
-        "dqn_train_episodes": 20000
+        "eps_end" : 0.05,
+        "eps_decay" : 5e-4,
+        "dqn_train_episodes": 2500
     },
 
     "forSAC" : {
@@ -17,7 +17,7 @@
         "action_bias" : 0.0,
         "device" : "cpu",
         "gamma" : 0.99,
-        "sac_train_episodes": 15000,
+        "sac_train_episodes": 1500,
         "lr" : 3e-4, 
         "tau" : 0.005, 
         "alpha" : 0.01,

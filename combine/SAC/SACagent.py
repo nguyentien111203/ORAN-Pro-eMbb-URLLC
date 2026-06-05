@@ -74,42 +74,50 @@ class SACAgent:
         self.alpha_opt = optim.Adam([self.log_alpha], lr=self.alpha_lr)
 
 
-    def select_action(self, state, last_action, beta=0.2):
-        """
-        beta: hệ số smoothing (0: không smooth, gần 1: rất smooth)
-        """
-        # 1. Chuẩn bị state
-        state = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+    def select_action(self, state):
 
-        # 2. Forward qua Actor (SAC thường output mean và log_std)
+        num_ru = self.num_rus
+        num_slices = self.num_slices
+
+
+        state_t = torch.as_tensor(
+            state,
+            dtype=torch.float32,
+            device=self.device
+        ).unsqueeze(0)
+
         with torch.no_grad():
-            # Ở chế độ inference (select_action), ta thường lấy mean và áp dụng tanh 
-            # để giới hạn về [-1, 1] trước khi map sang xác suất
-            mean, _ = self.actor.forward(state)
-            raw_action = (torch.tanh(mean) + 1) / 2  # đưa về [0,1]
-            raw_action = raw_action * self.action_scale + self.action_bias
+            action, _, _ = self.actor.sample(state_t)
 
-        
-        # 3. Reshape về cấu hình [R, B, S] 
-        # R: số RU, B: số BWP mỗi RU, S: số Slice
-        action = raw_action.reshape((self.num_rus, max(self.num_bwp_ru), self.num_slices))
+        action = action.squeeze(0).cpu().numpy()
 
-        # 4. Softmax per BWP của từng RU
-        # Đảm bảo tổng tỷ lệ PRB của các Slice (s) trên mỗi BWP (b) tại mỗi RU (r) là 1.0
-        for r in range(action.shape[0]):      # Duyệt qua từng RU
-            for b in range(action.shape[1]):  # Duyệt qua từng BWP
-                slice_weights = action[r, b]
-                # Softmax ổn định số học
-                exp_weights = np.exp(slice_weights - max(slice_weights))
-                action[r, b] = exp_weights / (sum(exp_weights) + 1e-9)
+        BWP_slice = [
+            [
+                [0.0 for _ in range(self.num_slices)]
+                for _ in range(self.num_bwp_ru[r])
+            ]
+            for r in range(num_ru)
+        ]
+        idx = 0
 
-        # 5. Action Smoothing (Nỗ lực ổn định SAC)
-        # Giúp giảm chi phí chuyển đổi C_s và giữ môi trường ổn định cho các DQN tầng dưới
-        if last_action is not None:
-            action = (1 - beta) * action + beta * last_action
+        for r in range(num_ru):
+            for b in range(self.num_bwp_ru[r]):
+                # lấy action của slice trên RU-BWP này
+                raw = action[
+                    idx:
+                    idx + num_slices
+                ]
+                idx += num_slices
+                # tránh âm do tanh / Gaussian policy
+                raw = np.maximum(raw, 0)
+                total = np.sum(raw)
+                # chuẩn hóa nếu vượt budget
+                if total > 1.0:
+                    raw = raw / total
+                for s in range(num_slices):
+                    BWP_slice[r][b][s] = raw[s]
 
-        return action
-
+        return BWP_slice
 
     def update(self, step, policy_delay, last_actor_loss, batch_size, debug=False):
         """

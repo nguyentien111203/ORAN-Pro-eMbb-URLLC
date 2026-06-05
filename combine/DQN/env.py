@@ -211,17 +211,19 @@ class RU_Env(gym.Env):
         averUE = self.calculateAverUE()
         minUE = self.calculateMinUE()
 
-        k = 5
+        #k = 5
         
-        lat_soft = 1 / (np.exp(k * (totalLatRate - 1)) + 1)
-        thr_soft = 1 / (np.exp(-k * (totalThrRate - 1)) + 1)
+        #lat_soft = 1 / (np.exp(-k * (totalLatRate - 1)) + 1)
+        #thr_soft = 1 / (np.exp(-k * (totalThrRate - 1)) + 1)
 
-        lat_term = np.sum(lat_soft)
-        thr_term = np.sum(thr_soft)
+        lat_soft = 1 / (1 + totalLatRate)
+        thr_soft = totalThrRate / (1 + totalThrRate)
+        lat_term = np.mean(lat_soft)
+        thr_term = np.mean(thr_soft)
 
-        reward = 10 * (self.w_reward["lat"] * lat_term + \
+        reward = (self.w_reward["lat"] * lat_term + \
                 self.w_reward["thr"] * thr_term + \
-                self.w_reward["cost"] * (1/4) * (4 - (cEne/self.scale_max[0]) - (cFrag/self.scale_max[1]) - \
+                self.w_reward["cost"] * (4 - (cEne/self.scale_max[0]) - (cFrag/self.scale_max[1]) - \
                                          (cSwit/self.scale_max[2]) - (cGB/self.scale_max[3])) + stab)
         # Kiểm tra xem đã sang frame mới chưa
         #print("Something for evaluate")
@@ -418,5 +420,3 @@ class RU_Env(gym.Env):
         Hàm trả về phân bổ PRB cho từng UE trong slice
         """
         return self.alloc
-
-    

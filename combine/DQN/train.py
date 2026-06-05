@@ -13,8 +13,10 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
     states = [np.zeros(envs[0].state_dim) for _ in range(num_ru)]
 
     losses = [[] for _ in range(num_ru)]
+    avg_losses = [[] for _ in range(num_ru)]
     avg_rewards = [[] for _ in range(num_ru)]
-    reward_windows = [deque(maxlen=50) for _ in range(num_ru)]  # tăng window
+    reward_windows = [[] for _ in range(num_ru)]  # tăng window
+    loss_windows = [[] for _ in range(num_ru)]  # tăng window
     rate_dict = {
         "min_urllc": [],
         "avg_urllc": [],
@@ -100,9 +102,10 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
                 loss = agents[r].optimize_model()
                 if loss is not None:
                     losses[r].append(loss)
+                    loss_windows[r].append(loss)
 
                 reward_windows[r].append(reward)
-
+                
                 next_states[r] = next_state
 
             states = next_states
@@ -111,12 +114,25 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
             done = (step >= max_steps)   # FIXED EPISODE LOGIC
 
         for r in range(num_ru):
-            ep_reward = np.mean(reward_windows[r])
+            ep_reward = np.mean(
+                [x for x in reward_windows[r]]
+            )
+
             avg_rewards[r].append(ep_reward)
+
+            if loss_windows[r]:
+                avg_losses[r].append(
+                    np.mean(loss_windows[r])
+                )
+            else:
+                avg_losses[r].append(0)
+
+            reward_windows[r].clear()
+            loss_windows[r].clear()
 
         # ================= EPSILON DECAY =================
         for agent in agents:
-            agent.eps = max(agent.eps_end, agent.eps * agent.eps_decay)
+            agent.eps = max(agent.eps_end, agent.eps - agent.eps_decay)
 
     plot_rate(rate_dict, "URLLC", "min")
     plot_rate(rate_dict, "URLLC", "avg")
@@ -126,7 +142,7 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
     plot_rate(rate_dict, "eMBB", "avg")
     plot_rate(rate_dict, "eMBB", "gap")
 
-    return avg_rewards, losses
+    return avg_rewards, avg_losses
 
 
 

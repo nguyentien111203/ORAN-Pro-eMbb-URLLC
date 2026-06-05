@@ -73,9 +73,10 @@ class MultiHeadDQNAgent:
         self.num_bwp = num_bwp
         self.gamma = train_cons["gamma"]
         self.batch_size = train_cons["batch_size"]
-        self.eps = train_cons["eps_start"]
+        self.eps_start = train_cons["eps_start"]
         self.eps_end = train_cons["eps_end"]
         self.eps_decay = train_cons["eps_decay"]
+        self.eps = self.eps_start
         self.lr = train_cons["lr"]
         self.learn_step = 0
         self.target_update = 2
@@ -102,8 +103,7 @@ class MultiHeadDQNAgent:
 
         # Replay buffer
         self.replay_buffer = ReplayBuffer(forSAC=False, capacity=buffer_capacity)
-
-
+    
     def select_action(self, state, BWP_slice):
 
         num_bwps = len(BWP_slice)
@@ -114,60 +114,90 @@ class MultiHeadDQNAgent:
             for _ in range(num_slices)
         ]
 
+
         state_t = torch.as_tensor(
-            state, dtype=torch.float32, device=self.device
+            state,
+            dtype=torch.float32,
+            device=self.device
         ).unsqueeze(0)
+
 
         with torch.no_grad():
             q_values = self.policy_net(state_t)
-            # list: [slice][1][BWP][UE]
+
 
         for s_idx in range(num_slices):
 
             num_ues = self.num_slice_ue[s_idx]
 
-            q_slice_all_bwp = q_values[s_idx].squeeze(0)
-            # [num_bwps, num_ues]
+            q_all = q_values[s_idx].squeeze(0)
+            # [BWP, UE]
+
 
             for bwp_idx in range(num_bwps):
 
                 budget = int(BWP_slice[bwp_idx][s_idx])
 
+
                 if budget <= 0:
-                    all_allocations[s_idx][bwp_idx] = np.zeros(num_ues, dtype=int)
+                    all_allocations[s_idx][bwp_idx] = np.zeros(
+                        num_ues,
+                        dtype=int
+                    )
                     continue
 
-                q_slice = q_slice_all_bwp[bwp_idx, :num_ues].cpu().numpy()
 
-                # ---- ε-greedy ----
+                q = q_all[bwp_idx, :num_ues].cpu().numpy()
+
+
+                alloc = np.zeros(num_ues, dtype=int)
+
+
+                # =====================
+                # Exploration
+                # =====================
                 if np.random.rand() < self.eps:
 
-                    probs = np.ones(num_ues) / num_ues
+                    # random UE sequence
+                    selected = np.random.randint(
+                        0,
+                        num_ues,
+                        size=budget
+                    )
 
+                    alloc = np.bincount(
+                        selected,
+                        minlength=num_ues
+                    )
+
+
+                # =====================
+                # Exploitation
+                # =====================
                 else:
-                    # shift tránh âm
-                    q_shift = q_slice - np.min(q_slice)
 
-                    # tránh all-zero
-                    probs = q_shift + 1e-8
+                    # xếp hạng Q
+                    ranking = np.argsort(q)[::-1]
 
-                    probs = probs / np.sum(probs)
 
-                # ---- chọn UE cho từng PRB ----
-                selected_ues = np.random.choice(
-                    num_ues,
-                    size=budget,
-                    replace=True,
-                    p=probs
-                )
+                    # phân PRB theo vòng
+                    # tránh dồn hết vào 1 UE
+                    ptr = 0
 
-                # ---- allocation vector nhanh hơn ----
-                prb_alloc = np.bincount(
-                    selected_ues,
-                    minlength=num_ues
-                )
+                    for _ in range(budget):
 
-                all_allocations[s_idx][bwp_idx] = prb_alloc
+                        ue = ranking[ptr]
+
+                        alloc[ue] += 1
+
+                        ptr += 1
+
+                        if ptr == num_ues:
+                            ptr = 0
+
+
+                all_allocations[s_idx][bwp_idx] = alloc
+
 
         return all_allocations
 
@@ -248,5 +278,9 @@ class MultiHeadDQNAgent:
 
         return loss.item()
 
-
+    def update_eps(self, episode, decay_episodes): 
+        if episode >= decay_episodes:
+            self.eps = self.eps_end
+        else :
+            self.eps = self.eps_start - (self.eps_start - self.eps_end) * episode / decay_episodes
 
