@@ -186,6 +186,14 @@ class FrameEnv(gym.Env):
                                 for slot in range(self.frame_slots)]) \
                           for u in range(len(self.URLLC_frame[0][s]))]
                           for s in range(len(self.URLLC_frame[0]))] 
+        
+        avg_rate = [np.average([action[r][b][s] for r in range(self.num_rus) 
+                               for b in range(len(self.RUs[r].bwps))]) for s in range(self.num_slices)]
+                               
+        eMBB_eff = [np.min(eMBB_frame_avg[s]) / avg_rate[s] 
+                    for s in range(len(self.eMBB_frame[0]))]
+        uRLLC_eff = [np.max(URLLC_frame_avg[s]) / avg_rate[s + self.num_embb] 
+                    for s in range(len(self.URLLC_frame[0]))]
                           
         eMBB_frame_soft = [[eMBB_frame_avg[s][u] / (1 + (eMBB_frame_avg[s][u])) 
                            for u in range(len(eMBB_frame_avg[s]))]
@@ -205,7 +213,7 @@ class FrameEnv(gym.Env):
 
         # reward
         reward = ((self.w_reward["thr"] *  embb_avg 
-                + self.w_reward["lat"] *  urllc_avg
+                + self.w_reward["lat"] *  urllc_avg + np.sum(eMBB_eff) + np.sum(uRLLC_eff)
                 + self.w_reward["cost"] * (4 - (np.average(self.costEne) / (self.scale_max[0]))  \
                                         -(np.average(self.costFrag) / (self.scale_max[1])) \
                                         - (np.average(self.costSwit) / (self.scale_max[2])) \
