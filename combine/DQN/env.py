@@ -121,6 +121,7 @@ class RU_Env(gym.Env):
         # Bẻ thẳng averUE, minUE
         averUE_flat = np.array([averUE[s][u] for s in range(self.num_slices) for u in range(self.num_ue[s])])
         minUE_flat = np.array([minUE[s][u] for s in range(self.num_urllc) for u in range(self.num_urllc_ue[s])])
+        
         state = np.concatenate((
             urllc_rate,
             embb_rate,
@@ -183,7 +184,7 @@ class RU_Env(gym.Env):
         return flatBit, flatThr
 
 
-    def step(self, totalLatRate, totalThrRate):
+    def step(self, totalLatRate, totalThrRate, latSoft, thrSoft):
         """
         Sau khi thực hiện action, tính toán reward, tìm ra state tiếp theo và 
         trả về các thông tin về trễ của từng urllc
@@ -211,29 +212,28 @@ class RU_Env(gym.Env):
         averUE = self.calculateAverUE()
         minUE = self.calculateMinUE()
 
-        #k = 5
-        
-        #lat_soft = 1 / (np.exp(-k * (totalLatRate - 1)) + 1)
-        #thr_soft = 1 / (np.exp(-k * (totalThrRate - 1)) + 1)
+        # Tính toán hiệu quả sử dụng tài nguyên
+        eff = (sum(thrSoft) + sum(latSoft)) / (np.sum(self.alloc))
+        lamda_eff = 0.5
 
-        lat_soft = 1 / (1 + totalLatRate)
-        thr_soft = totalThrRate / (1 + totalThrRate)
-        lat_term = np.mean(lat_soft)
-        thr_term = np.mean(thr_soft)
-
-        reward = (self.w_reward["lat"] * lat_term + \
-                self.w_reward["thr"] * thr_term + \
+        reward = (self.w_reward["lat"] * np.average(latSoft) + \
+                self.w_reward["thr"] * np.average(thrSoft) + \
                 self.w_reward["cost"] * (4 - (cEne/self.scale_max[0]) - (cFrag/self.scale_max[1]) - \
-                                         (cSwit/self.scale_max[2]) - (cGB/self.scale_max[3])) + stab)
-        # Kiểm tra xem đã sang frame mới chưa
-        #print("Something for evaluate")
-        #print(np.std(totalThrRate), " ")
-        #print(np.std(totalLatRate), " ")
-        #print(reward, "\n")
-        #print("Cost : ",cEne, " ", cFrag, " ", cSwit, " ", cGB, '\n')
-        #print("latency : ", lat_soft, '\n')
-        #print("thr : ", thr_soft, '\n')
-        #print("reward : ", reward, '\n')
+                                         (cSwit/self.scale_max[2]) - (cGB/self.scale_max[3])) + stab) + \
+                lamda_eff * eff
+        
+        #print( "eMBB min, mean, max : ",
+        #    np.min(totalThrRate), ' ',
+        #    np.mean(totalThrRate), ' ', 
+        #    np.max(totalThrRate), '\n'
+        #    )
+
+        #print( "urllc min, mean, max : ",  
+        #    np.min(totalLatRate), ' ',
+        #    np.mean(totalLatRate), ' ',
+        #    np.max(totalLatRate), '\n'
+        #    )
+        
         done = self.index_subframe > self.frame_slots
 
         # Đưa ra state tiếp theo và action tiếp
@@ -256,7 +256,7 @@ class RU_Env(gym.Env):
         """
         Tính toán nhiễu liên BWP
         """
-        leakage = 1e-7
+        leakage = 1e-13
         interBWP = np.zeros(self.num_slices)
         for u in range(self.num_slices):
             for b in range(len(self.RU.bwps)):
@@ -275,8 +275,12 @@ class RU_Env(gym.Env):
         for i in range(self.num_slices):
             for b in range(len(self.RU.bwps)):
                 for u in range(self.num_ue[i]): 
+                    noise = self.RU.bwps[b].bandwidth * self.N0 * (self.inter_RU + 1) + interBWP[u]
                     self.snr[i][b][u] = (self.RU.bwps[b].p_each_PRB * self.H[i][u]) \
-                        / (self.RU.bwps[b].bandwidth * self.N0 * (self.inter_RU + 1) + interBWP[u]) 
+                        / noise
+        #print("max SINR : ", np.max(self.snr) ,'\n')
+        #print("min SINR : ", np.min(self.snr) ,'\n')
+        #print("aver SINR : ", np.average(self.snr) ,'\n')
 
 
     def calculateNumBit(self):

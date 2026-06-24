@@ -109,88 +109,6 @@ def genSlices(ue_path, slice_path):
     return urllc_slices, embb_slices
 
 
-def generate_channel_gain(R, frame_slot, I, K, model="rayleigh", K_factor=5, seed=None):
-    """
-    Sinh ma trận độ lợi kênh H[r, frame_slot, i, k] (thực, dương), phản ánh fading + path loss thực tế.
-
-    Parameters
-    ----------
-    R : int
-        Số RU.
-    frame_slot : int
-        Số slot trong một frame.
-    I : int
-        Số slice hoặc user.
-    K : int
-        Số PRB mỗi RU.
-    model : str
-        Kiểu mô hình fading ("rayleigh", "rician", "uniform", "gaussian").
-    K_factor : float
-        Hệ số Rician K-factor (dB) nếu chọn mô hình Rician.
-    seed : int or None
-        Seed để tái lập kết quả.
-
-    Returns
-    -------
-    H : np.ndarray
-        Ma trận H có shape (R, frame_slot, I, K), giá trị dương nhỏ phản ánh fading + path loss.
-    """
-    if seed is not None:
-        np.random.seed(seed)
-
-    # Fading
-    if model.lower() == "rayleigh":
-        fading = np.sqrt(np.random.randn(R, frame_slot, I, K)**2 +
-                         np.random.randn(R, frame_slot, I, K)**2) / np.sqrt(2)
-
-    elif model.lower() == "rician":
-        K_lin = 10 ** (K_factor / 10)
-        h_los = np.ones((R, frame_slot, I, K))
-        h_nlos = np.sqrt(np.random.randn(R, frame_slot, I, K)**2 +
-                         np.random.randn(R, frame_slot, I, K)**2) / np.sqrt(2)
-        fading = np.sqrt(K_lin / (K_lin + 1)) * h_los + np.sqrt(1 / (K_lin + 1)) * h_nlos
-
-    elif model.lower() == "uniform":
-        fading = np.random.uniform(0.1, 1.0, size=(R, frame_slot, I, K))
-
-    elif model.lower() == "gaussian":
-        fading = np.abs(np.random.randn(R, frame_slot, I, K))
-
-    else:
-        raise ValueError(f"Unknown channel model: {model}")
-
-    # ---- LARGE-SCALE: distances & pathloss (fixed per frame) ----
-    # sample distances per RU-UE (shape (R,I));
-    ru_pos, ue_pos = generate_topology(num_RUs=R,num_UEs=I)
-    plot_topology(ru_pos, ue_pos, du_cu_pos=(0,0), R_cell=50,R_ru=250)
-    dist_ue_ru, dist_ru_ru = calDistance(num_UEs=I, num_RUs=R,ru_pos=ru_pos, ue_pos=ue_pos)
-
-    # FSPL in dB 
-    f = 3.5
-    # f in GHz, distance in meters
-    FSPL_dB_ru_ue = 32.4 + 20*np.log10(f) + 20*np.log10(dist_ue_ru)
-    FSPL_dB_ru_ru = 32.4 + 20*np.log10(f) + 20*np.log10(dist_ru_ru)
-
-    #FSPL_dB = 120.8 + 37.5*np.log10(d)  # Phục vụ kịch bản thử
-
-    # shadowing (log-normal) per RU-UE (dB)
-    sigma_sh = 6.0  # dB, choose 4..8 dB depending LOS/NLOS
-    shadowing_dB_ru_ue = np.random.normal(0.0, sigma_sh, size=(R, I))
-    shadowing_dB_ru_ru = np.random.normal(0.0, sigma_sh, size=(R, R))
-
-    # total pathloss (dB) and linear power gain (unitless)
-    PL_dB_ru_ue = FSPL_dB_ru_ue + shadowing_dB_ru_ue      # shape (R,I)
-    path_loss_lin = 10.0 ** (-PL_dB_ru_ue / 10.0)   # power-domain gain. shape (R,I)
-    path_loss_lin_exp = path_loss_lin[:, np.newaxis, :, np.newaxis]
-
-    # gain for ru - ru
-    gain_ru_ru =  10.0 ** (-(FSPL_dB_ru_ru + shadowing_dB_ru_ru) / 10.0)
-
-    # Tổng độ lợi kênh: fading × path loss
-    H = (fading**2) * path_loss_lin_exp
-
-    return H, gain_ru_ru, dist_ue_ru
-
 
 def generate_pipeline_inputs(RU_path, slice_path, ue_path, consta):
     """
@@ -249,38 +167,59 @@ def calculateScaleMax(RUs, embb_slices, urllc_slices, cost_switch, cost_gb):
 
 
 def generate_h_matrix(num_rus, num_slots, num_slices,
-                      num_urllc_ue, num_embb_ue):
-    """
-    Tạo ma trận H [RU][Slot][Slice][UE]
-    - num_urllc_ue: list chứa số UE của từng slice URLLC.
-    - num_embb_ue: list chứa số UE của từng slice eMBB.
-    """
-    # Hợp nhất danh sách số lượng UE của tất cả các slice để dễ lặp
-    all_slice_ue_counts = num_urllc_ue + num_embb_ue #
-    
+                      num_urllc_ue, num_embb_ue,
+                      seed=None):
+
+    if seed is not None:
+        np.random.seed(seed)
+
+    all_slice_ue_counts = num_urllc_ue + num_embb_ue
+    total_ue = sum(all_slice_ue_counts)
+
+    # =========================
+    # topology
+    # =========================
+    ru_pos, ue_pos = generate_topology(
+        num_RUs=num_rus,
+        num_UEs=total_ue
+    )
+    dist_ue_ru, _ = calDistance(
+        num_UEs=total_ue,
+        num_RUs=num_rus,
+        ru_pos=ru_pos,
+        ue_pos=ue_pos
+    )
+
+    dist_ue_ru = np.maximum(dist_ue_ru, 1)
+    # =========================
+    # pathloss
+    # =========================
+    f = 3.5   # GHz
+    PL_dB = (32.4 + 20*np.log10(f) + 20*np.log10(dist_ue_ru))
+    # shadowing cố định theo UE-RU
+    sigma_sh = 6
+    shadow_dB = np.random.normal(0,sigma_sh,size=(num_rus, total_ue))
+    PL_total = PL_dB + shadow_dB
+    path_gain = 10 ** (-PL_total / 10)
+    # =========================
+    # H matrix
+    # =========================
     H = []
     for r in range(num_rus):
         slots_h = []
         for t in range(num_slots):
             slices_h = []
+            ue_idx = 0
             for s in range(num_slices):
                 num_ues = all_slice_ue_counts[s]
-                
-                # 1. Tạo "khoảng cách" ngẫu nhiên cố định cho UE này (để giữ tính ổn định tương đối)
-                # Giả lập gain nền từ 0.001 đến 0.1
-                base_gain = np.random.uniform(0.001, 0.1, size=num_ues)
-                
-                # 2. Thêm Fading biến động theo từng time slot (Rayleigh Fading)
-                # exponential(1.0) mô phỏng bình phương biên độ Rayleigh
+                # lấy gain nền
+                base_gain = path_gain[r,ue_idx:ue_idx + num_ues]
+                # Rayleigh power fading
                 fading = np.random.exponential(1.0, size=num_ues)
-                
-                # Gain tổng hợp
-                ue_gains = base_gain * fading
-                slices_h.append(ue_gains)
-                
+                ue_gain = base_gain * fading
+                slices_h.append(ue_gain)
+                ue_idx += num_ues
             slots_h.append(slices_h)
         H.append(slots_h)
-        
+
     return H
-
-

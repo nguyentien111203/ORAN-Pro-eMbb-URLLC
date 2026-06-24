@@ -1,7 +1,8 @@
-from input.takeInput import load_cons_from_json, save_gain_matrix, load_gain_matrix
-from input.genInput import generate_pipeline_inputs, generate_channel_gain, calculateScaleMax, generate_h_matrix
+from input.takeInput import load_cons_from_json
+from input.genInput import generate_pipeline_inputs, calculateScaleMax, generate_h_matrix
 from combine.train import alternating_training, buildEnvAgent
 from tqdm import trange
+import numpy as np
 
 def main():
     # --- Lấy các hằng số đầu vào ---
@@ -9,14 +10,18 @@ def main():
     
     trainCons = load_cons_from_json(json_path=r"./config/trainCons.json")
     # --- Tạo input ---
-    RUs, embb_slices, urllc_slices, num_urllc_ue, num_embb_ue = generate_pipeline_inputs("./config/ru.yaml", "./config/slice.yaml",
-                                                              "./config/ue.yaml", consta)
+    RUs, embb_slices, urllc_slices, num_urllc_ue, num_embb_ue = generate_pipeline_inputs("./config/ru.yaml", "./config/slice1.yaml",
+                                                              "./config/ue1.yaml", consta)
     
     scale_max = calculateScaleMax(RUs, embb_slices, urllc_slices, consta["cost_switch"], consta["cost_gb"])
     
     # Tạm để debug
     H = generate_h_matrix(len(RUs), consta["frame_slots"], len(embb_slices) + len(urllc_slices), 
                           num_urllc_ue, num_embb_ue)
+
+    #print("max H : ",np.max(H),'\n')
+    #print("min H : ", np.min(H), '\n')
+    #print("aver H : ", np.average(H), '\n')
 
     envs, agents, frame_env, sac_agent = buildEnvAgent(
         RUs, embb_slices, urllc_slices, H, consta["inter_RU"], consta["inter_factor"], 

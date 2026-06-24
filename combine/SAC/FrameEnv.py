@@ -28,8 +28,7 @@ class FrameEnv(gym.Env):
         self.num_embb = len(embb_slices)
         self.num_slices = self.num_urllc + self.num_embb
 
-        self.state_dim = 4 + self.num_slices
-
+        self.state_dim = 5 + 4*self.num_slices
         self.observation_space = spaces.Box(
             low=0.0, 
             high=1.0, 
@@ -45,7 +44,7 @@ class FrameEnv(gym.Env):
             dtype=np.float32
         )
 
-        # Ma trận phân bổ số PRB từng BWP về từng slice (để chỉ số của slice urllc trước, sau đó mới đến slice embb)
+        # Ma trận phân bổ số PRB từng BWP về từng slice (để chỉ số của slice embb trước, sau đó mới đến slice urllc)
         self.BWP_slice = [[[0 for _ in range(len(self.RUs[r].bwps))] for _ in range(self.num_slices)] for r in range(self.num_rus)]
         self.last_BWP_slice = [[[0 for _ in range(len(self.RUs[r].bwps))] for _ in range(self.num_slices)] for r in range(self.num_rus)]
 
@@ -57,6 +56,7 @@ class FrameEnv(gym.Env):
 
         self.thr_min = np.array([ue.thr for s in range(self.num_embb) 
                             for ue in self.RU_envs[0].embb_slices[s].ue_set])
+        self.avg_rate = []
         
         self.URLLC_frame = []
         self.eMBB_frame = []
@@ -74,6 +74,8 @@ class FrameEnv(gym.Env):
                 self.eMBB_frame[slot].append(np.zeros(len(self.embb_slices[s].ue_set), np.float64))
                 self.embb_frame_rate[slot].append(np.zeros(len(self.embb_slices[s].ue_set), np.float64))
 
+        self.avg_lat = 0
+        self.vio_lat = 0
         # Tính toán các chi phí trên từng frame
         self.costEne = np.zeros(self.frame_slots)
         self.costFrag = np.zeros(self.frame_slots)
@@ -121,6 +123,8 @@ class FrameEnv(gym.Env):
         # Action ở đây là tỷ lệ phân bổ
         # Cần dịch từ tỷ lệ ra số PRB trước khi đưa vào select_action
         budget_BWP_slice = self.convertRateToPRB(action)
+        beta = 1.5
+        alpha = 2
         
         for slot_index in range(self.frame_slots):
             numBits = np.array([1e-7 for s in range(self.num_urllc) 
@@ -167,9 +171,21 @@ class FrameEnv(gym.Env):
                     self.embb_frame_rate[slot_index][s][u] = flat_embb_rate[offset]
                     offset += 1  
             
+            lat_soft = []
+            thr_soft = []
+            
+            for s in range(len(self.URLLC_frame[slot_index])):
+                for u in range(len(self.urllc_frame_rate[slot_index][s])):
+                    lat_soft.append(1 / (1 + alpha * max(self.urllc_frame_rate[slot_index][s][u]-1,0)))
+
+            for s in range(len(self.eMBB_frame[slot_index])):
+                for u in range(len(self.embb_frame_rate[slot_index][s])):
+                    thr_soft.append(min(self.embb_frame_rate[slot_index][s][u], 1))
+
+                                    
             # Áp action vào tính toán và 
             for r, env in enumerate(self.RU_envs):
-                DQNstate[r], _, _, info = env.step(flat_urllc_rate, flat_embb_rate)
+                DQNstate[r], _, _, info = env.step(flat_urllc_rate, flat_embb_rate, lat_soft, thr_soft)
 
                 self.costEne[slot_index] += info["costE"]
                 self.costFrag[slot_index] += info["costF"]
@@ -178,7 +194,7 @@ class FrameEnv(gym.Env):
 
         # Tính trung bình trong 1 frame
         
-        eMBB_frame_avg = [[np.average([self.embb_frame_rate[slot][s][u] 
+        eMBB_frame_avg = [[np.average([min(self.embb_frame_rate[slot][s][u],1) 
                                       for slot in range(self.frame_slots)]) \
                           for u in range(len(self.eMBB_frame[0][s]))] 
                           for s in range(len(self.eMBB_frame[0]))]
@@ -187,37 +203,79 @@ class FrameEnv(gym.Env):
                           for u in range(len(self.URLLC_frame[0][s]))]
                           for s in range(len(self.URLLC_frame[0]))] 
         
-        avg_rate = [np.average([action[r][b][s] for r in range(self.num_rus) 
+        self.avg_rate = [np.sum([action[r][b][s] for r in range(self.num_rus) 
                                for b in range(len(self.RUs[r].bwps))]) for s in range(self.num_slices)]
                                
-        eMBB_eff = [np.min(eMBB_frame_avg[s]) / avg_rate[s] 
-                    for s in range(len(self.eMBB_frame[0]))]
-        uRLLC_eff = [np.max(URLLC_frame_avg[s]) / avg_rate[s + self.num_embb] 
-                    for s in range(len(self.URLLC_frame[0]))]
+        #eMBB_eff = np.minimum(eMBB_frame_avg[s],1)
+        #uRLLC_eff = np.percentile(URLLC_frame_avg[s], 90)
+        #eff = (np.sum(eMBB_eff) + np.sum(uRLLC_eff)) / sum(self.avg_rate)
                           
-        eMBB_frame_soft = [[eMBB_frame_avg[s][u] / (1 + (eMBB_frame_avg[s][u])) 
-                           for u in range(len(eMBB_frame_avg[s]))]
-                           for s in range(len(eMBB_frame_avg))] 
-                           
-        
-        URLLC_frame_soft = [[1 / (1 + (URLLC_frame_avg[s][u])) 
-                           for u in range(len(URLLC_frame_avg[s]))]
-                           for s in range(len(URLLC_frame_avg))]
-                           
+        # ============================
+        # eMBB reward: throughput target
+        # ============================
+        eMBB_gap = []
 
-        # Tính tỷ lệ trễ và throughput trung bình
-        embb_avg = np.sum(eMBB_frame_soft[s][e] for s in range(len(self.embb_slices)) 
-                          for e in range(len(self.embb_slices[s].ue_set)))
-        urllc_avg = np.sum(URLLC_frame_soft[s][u] for s in range(len(self.urllc_slices)) 
-                          for u in range(len(self.urllc_slices[s].ue_set)))
+        for s in range(len(eMBB_frame_avg)):
+            for u in range(len(eMBB_frame_avg[s])):
+                rate = eMBB_frame_avg[s][u]
+                eMBB_gap.append(max(1 - rate, 0))
 
-        # reward
-        reward = ((self.w_reward["thr"] *  embb_avg 
-                + self.w_reward["lat"] *  urllc_avg + np.sum(eMBB_eff) + np.sum(uRLLC_eff)
-                + self.w_reward["cost"] * (4 - (np.average(self.costEne) / (self.scale_max[0]))  \
-                                        -(np.average(self.costFrag) / (self.scale_max[1])) \
-                                        - (np.average(self.costSwit) / (self.scale_max[2])) \
-                                        - (np.average(self.costGB) / (self.scale_max[3])))))
+        embb_gap = np.mean(eMBB_gap)
+
+
+        # ============================
+        # URLLC reward: latency target
+        # ============================
+        URLLC_soft = []
+
+        for s in range(len(URLLC_frame_avg)):
+            slice_reward = []
+
+            for u in range(len(URLLC_frame_avg[s])):
+                lat = URLLC_frame_avg[s][u]
+
+                if lat <= 1.0:
+                    # dưới QoS càng tốt
+                    value = 1 + (1 - lat)
+                else:
+                    # vượt QoS giảm mềm
+                    value = np.exp(-2.0 * (lat - 1))
+
+                slice_reward.append(value)
+
+            URLLC_soft.append(slice_reward)
+
+
+        urllc_values = np.array(URLLC_soft).flatten()
+
+        urllc_reward = np.mean(urllc_values)
+
+        # tránh một vài UE/slice bị bỏ rơi
+        urllc_fair = np.std(urllc_values)
+        total_qos = urllc_reward - embb_gap
+
+        band_eff = total_qos / (np.sum(self.avg_rate) + 1e-7)
+
+        # ============================
+        # Cost normalization
+        # ============================
+        cost_reward = (
+            4
+            - (np.average(self.costEne) / self.scale_max[0])
+            - (np.average(self.costFrag) / self.scale_max[1])
+            - (np.average(self.costSwit) / self.scale_max[2])
+            - (np.average(self.costGB) / self.scale_max[3])
+        )
+
+
+        # ============================
+        # Final reward
+        # ============================
+        reward = (
+            self.w_reward["lat"] * (urllc_reward - 1.3 * urllc_fair)
+            - self.w_reward["thr"] * embb_gap
+            + self.w_reward["cost"] * cost_reward + 0.3* band_eff 
+        )
 
         info = {
             "thr": eMBB_frame_avg,
@@ -228,6 +286,12 @@ class FrameEnv(gym.Env):
             "costGB": self.costGB
         }
 
+        self.avg_lat = np.average(URLLC_frame_avg)
+        
+        for s in range(len(self.urllc_slices)):
+            for u in range(len(self.urllc_slices[s].ue_set)):
+                if URLLC_frame_avg[s][u] > 1.0:
+                    self.vio_lat += 1
         # Reset lại phân bổ
         self.last_BWP_slice = self.BWP_slice
         next_state = self.get_state(eMBB_frame_avg, URLLC_frame_avg, self.costEne, self.costFrag, self.costSwit, self.costGB)
@@ -257,17 +321,42 @@ class FrameEnv(gym.Env):
         """
         # Tìm tỷ lệ throughput, latency thấp nhất ở từng slice
         minThrRate = []
+        avgThrRate = []
+        stdThrRate = []
+        budget_rate_embb = []
         for s in range(len(self.embb_slices)):
             minThrRate.append(np.min(eMBB_frame[s]))
+            avgThrRate.append(np.average(eMBB_frame[s]))
+            stdThrRate.append(np.std(eMBB_frame[s]))
+            if self.avg_rate[s] == 0.0: 
+                budget_rate_embb.append(0)
+            else:
+                budget_rate_embb.append(np.min(self.eMBB_frame[s]) / (self.avg_rate[s]))
         
-        maxLatRate = []
+        avgLatRate = []
+        p90_rate = []
+        gap = []
+        budget_rate_urllc = []
         for s in range(len(self.urllc_slices)):
-            maxLatRate.append(np.min(URLLC_frame[s]))
+            lats = np.array(URLLC_frame[s])
+            avgLatRate.append(np.max(URLLC_frame[s]))
+            p90_rate.append(np.percentile(URLLC_frame[s],90))
+            gap.append(min(1 - max(lats),0))
+            if self.avg_rate[s + self.num_embb] == 0.0:
+                budget_rate_urllc.append(0)
+            else :
+                budget_rate_urllc.append(np.max(self.URLLC_frame[s]) / self.avg_rate[s + self.num_embb])
+
+        budget_state = np.average(self.BWP_slice)
+        
 
         # Ghép state
-        state = np.concatenate([minThrRate, maxLatRate, [np.average(costEne) / self.scale_max[0],
+        state = np.concatenate([minThrRate, avgThrRate, stdThrRate, budget_rate_embb,
+                                avgLatRate, p90_rate, gap, budget_rate_urllc,
+                                [np.average(costEne) / self.scale_max[0],
                                 np.average(costFrag) / self.scale_max[1], np.average(costSwit) / self.scale_max[2],
-                                np.average(costGB) / self.scale_max[3]]])
+                                np.average(costGB) / self.scale_max[3]],
+                                [budget_state]])
         return state.astype(np.float32)
 
 

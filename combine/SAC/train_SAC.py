@@ -47,6 +47,8 @@ def train_sac(env, agent, num_episodes=300, log_interval=10, update_per_step=1, 
         steps = 0
 
         while not done:
+            env.vio_lat = 0
+            env.avg_lat = 0
             action = agent.select_action(state)
             next_state, reward, done, info = env.step(action)
 
@@ -83,6 +85,10 @@ def train_sac(env, agent, num_episodes=300, log_interval=10, update_per_step=1, 
         else:
             avg_actor_loss = 0.0
             avg_critic_loss = 0.0
+        if ep % 100 == 0:
+            print(env.avg_rate, '\n')
+            print(env.avg_lat, '\n')
+            print(env.vio_lat, '\n')
 
         rewards_history.append(total_reward)
         actor_losses.append(avg_actor_loss)

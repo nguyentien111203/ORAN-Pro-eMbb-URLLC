@@ -8,8 +8,8 @@
         "batch_size" : 32,
         "eps_start" : 1.0,
         "eps_end" : 0.05,
-        "eps_decay" : 5e-4,
-        "dqn_train_episodes": 25000
+        "eps_decay" : 5e-3,
+        "dqn_train_episodes": 2500
     },
 
     "forSAC" : {
@@ -17,7 +17,7 @@
         "action_bias" : 0.0,
         "device" : "cpu",
         "gamma" : 0.99,
-        "sac_train_episodes": 15000,
+        "sac_train_episodes": 10000,
         "lr" : 3e-4, 
         "tau" : 0.005, 
         "alpha" : 0.01,

@@ -8,9 +8,9 @@ import numpy as np
 def generate_topology(
     num_RUs,
     num_UEs,
-    R_ru=50,         # bán kính phân bố RU quanh DU/CU (m)
-    R_ue=80,         # bán kính phục vụ của mỗi RU (m)
-    d_min_ru=40,     # khoảng cách tối thiểu giữa các RU (m)
+    R_ru=0,         # bán kính phân bố RU quanh DU/CU (m)
+    R_ue=1000,         # bán kính phục vụ của mỗi RU (m)
+    d_min_ru=0,     # khoảng cách tối thiểu giữa các RU (m)
     seed=None,
     max_iter=10000
 ):
@@ -82,6 +82,9 @@ def calDistance(num_UEs, num_RUs, ru_pos, ue_pos):
         for rp in range(num_RUs):
             dist_ru_ru[r, rp] = np.linalg.norm(ru_pos[r] - ru_pos[rp])
 
+    print("min d : ", np.min(dist_ue_ru),'\n')
+    print("max d : ", np.max(dist_ue_ru),'\n')
+    print("aver d : ", np.average(dist_ue_ru),'\n')
     return dist_ue_ru, dist_ru_ru
 
 

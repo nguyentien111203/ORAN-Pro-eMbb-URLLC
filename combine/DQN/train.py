@@ -9,7 +9,8 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
     num_slices = envs[0].num_slices
     num_embb = envs[0].num_embb
     num_urllc = envs[0].num_urllc
-
+    beta = 1.5
+    alpha = 3
     states = [np.zeros(envs[0].state_dim) for _ in range(num_ru)]
 
     losses = [[] for _ in range(num_ru)]
@@ -56,7 +57,7 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
                 agents[r].select_action(states[r], initBWP_slice[r])
                 for r in range(num_ru)
             ]
-            #print("action : ", actions[0])
+            
             # ================= OUTPUT =================
             numBits = np.array([
                 1e-7
@@ -84,10 +85,17 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
             rate_dict["min_embb"].append(np.min(embb_rate))
             rate_dict["min_urllc"].append(np.min(urllc_rate))
 
+            lat_soft = []
+            thr_soft = []
+            for u in range(len(urllc_rate)):
+                lat_soft.append(1 / (1 + alpha * max(urllc_rate[u]-1,0)))
+            for u in range(len(embb_rate)):
+                thr_soft.append(np.tanh(beta * embb_rate[u]))
+            
             for r in range(num_ru):
 
                 next_state, reward, done_env, _ = envs[r].step(
-                    urllc_rate, embb_rate
+                    urllc_rate, embb_rate, lat_soft, thr_soft
                 )
 
 

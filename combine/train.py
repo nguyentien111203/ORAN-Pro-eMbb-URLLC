@@ -81,9 +81,7 @@ def alternating_training(num_rus, envs, agents,
     models_path = []
 
     # Budget cho các slice ban đầu
-    BWP_slice = [[[frame_env.RUs[r].bwps[b].num_prb / frame_env.num_slices 
-                   for _ in range(frame_env.num_slices)] 
-                  for b in range(len(frame_env.RUs[r].bwps))] for r in range(num_rus)]
+    BWP_slice = init_slice_budget(frame_env, num_rus, 1, 1)
 
     # Train DQN ở từng RU
     print(f"-- Training DQN agents --")
@@ -103,7 +101,76 @@ def alternating_training(num_rus, envs, agents,
     #return embb_models_path, urllc_models_path, sac_model_path
 
 
+def init_slice_budget(frame_env, num_rus, urllc_weight=1.2, embb_weight=1.0):
+    """
+    Khởi tạo budget PRB cho SAC.
+
+    Output:
+        BWP_slice[r][b][s]
+
+    r: RU
+    b: BWP
+    s: slice
+
+    Giá trị trả về là số PRB.
+    Tổng PRB các slice trên mỗi BWP = num_prb của BWP.
+    """
+
+    num_slices = frame_env.num_slices
+
+    num_embb = len(frame_env.embb_slices)
+    num_urllc = len(frame_env.urllc_slices)
 
 
+    # tạo trọng số ưu tiên
+    weights = np.zeros(num_slices)
+
+    for s in range(num_slices):
+        if s < num_embb:
+            weights[s] = embb_weight
+        else:
+            weights[s] = urllc_weight
 
 
+    # chuẩn hóa
+    weights = weights / np.sum(weights)
+
+
+    BWP_slice = []
+
+
+    for r in range(num_rus):
+
+        ru_budget = []
+
+        for b in range(len(frame_env.RUs[r].bwps)):
+
+            total_prb = frame_env.RUs[r].bwps[b].num_prb
+
+            # phân PRB theo weight
+            raw_prb = weights * total_prb
+
+            # lấy phần nguyên trước
+            prb_alloc = np.floor(raw_prb).astype(int)
+
+            # phần PRB còn thiếu
+            remain = total_prb - np.sum(prb_alloc)
+
+
+            # phân phần dư cho slice có phần thập phân lớn nhất
+            if remain > 0:
+                frac = raw_prb - prb_alloc
+
+                idx = np.argsort(frac)[::-1]
+
+                for i in range(remain):
+                    prb_alloc[idx[i % num_slices]] += 1
+
+
+            ru_budget.append(prb_alloc.tolist())
+
+
+        BWP_slice.append(ru_budget)
+
+
+    return BWP_slice
