@@ -198,6 +198,10 @@ class FrameEnv(gym.Env):
                                       for slot in range(self.frame_slots)]) \
                           for u in range(len(self.eMBB_frame[0][s]))] 
                           for s in range(len(self.eMBB_frame[0]))]
+        
+        embb_frame_sum = [np.sum(self.eMBB_frame[slot])
+                          for slot in range(self.frame_slots)]
+        
         URLLC_frame_avg = [[np.average([self.urllc_frame_rate[slot][s][u] 
                                 for slot in range(self.frame_slots)]) \
                           for u in range(len(self.URLLC_frame[0][s]))]
@@ -278,12 +282,13 @@ class FrameEnv(gym.Env):
         )
 
         info = {
-            "thr": eMBB_frame_avg,
-            "lat": URLLC_frame_avg,
+            "thr": embb_frame_sum,
+            "lat": self.URLLC_frame,
             "costE": self.costEne,
             "costF": self.costFrag,
             "costS": self.costSwit,
-            "costGB": self.costGB
+            "costGB": self.costGB,
+            "resource_eff": embb_frame_sum / sum(budget_BWP_slice)
         }
 
         self.avg_lat = np.average(URLLC_frame_avg)

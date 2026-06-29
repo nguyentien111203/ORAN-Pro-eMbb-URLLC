@@ -9,12 +9,14 @@ from combine.DQN.env import RU_Env
 from combine.SAC.FrameEnv import FrameEnv
 from combine.DQN.train import train_dqn
 from combine.SAC.train_SAC import train_sac 
+from combine.SAC_benchmark.train_SAC import train_sacBM
 from combine.utils.plotDQN import plot_DQNtraining_curves, plot_DQNlosstraining_curves
 from combine.utils.pltSAC import plot_SACactorlosstraining_curves, plot_SACcriticlosstraining_curves, plot_SACtraining_curves
+from combine.SAC_benchmark.SACagent import SACAgentBM
 
 
 def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, inter_factor, N0,
-                  w_reward, cost_switch, cost_gb, scale_max, train_cons, frame_slots):
+                  w_reward, cost_switch, cost_gb, scale_max, train_cons, frame_slots, mode):
     """
     Dựng các môi trường và agent cho SAC và DQN
     set of Radio Unit RUs : tập các RU
@@ -27,6 +29,7 @@ def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, inter_factor, N0,
     cost_gb : hệ số guard band
     scale_max : các giá trị scale theo từng thành phần trong scale_max
     train_cons : hằng số trong training mô hình
+    mode: "bm" hoặc "fm" là benchmark hoặc là framework
 
     giá trị trả về :
     embb_envs, urllc_envs : tập các môi trường cho embb và urllc ở từng RU
@@ -56,14 +59,18 @@ def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, inter_factor, N0,
     # Frame env và SAC agent
     num_bwp_ru = [len(RUs[r].bwps) for r in range(len(RUs))]
     frame_env = FrameEnv(RUs, envs, urllc_slices, embb_slices, H, w_reward, scale_max, frame_slots)
-    sac_agent = SACAgent(frame_env.state_dim, len(RUs), 
-                         num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"])
+    if mode == "fm":
+        sac_agent = SACAgent(frame_env.state_dim, len(RUs), 
+                            num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"])
+    else:
+        sac_agent = SACAgentBM(frame_env.state_dim, len(RUs), 
+                            num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"])
 
     return envs, agents, frame_env, sac_agent
 
 
 def alternating_training(num_rus, envs, agents, 
-                         frame_env, sac_agent, numepDQN, numepSAC):
+                         frame_env, sac_agent, numepDQN, numepSAC, mode):
     """
     Hàm thực hiện train mô hình và lưu
     Input :
@@ -71,6 +78,7 @@ def alternating_training(num_rus, envs, agents,
     agents : tập agent 
     frame_env : môi trường của sac 
     sac_agent : agent của sac
+    mode: "bm" hoặc "fm" là benchmark hoặc framework
 
     Output :
     models_path : tập các đường dẫn tới file lưu model dqn
@@ -91,11 +99,14 @@ def alternating_training(num_rus, envs, agents,
     plot_DQNlosstraining_curves(losses[0], 0, envs[0].num_slices, envs[0].num_urllc)
 
     # Train SAC chung
-    print("-- Training SAC (frame-level) --")
-    avg_rewards, actor_losses, critic_losses, sac_model_path = train_sac(frame_env, sac_agent, numepSAC)
-    plot_SACtraining_curves(avg_rewards, num_rus, envs[0].num_slices, envs[0].num_urllc)
-    plot_SACactorlosstraining_curves(actor_losses, num_rus, envs[0].num_slices, envs[0].num_urllc)
-    plot_SACcriticlosstraining_curves(critic_losses, num_rus, envs[0].num_slices, envs[0].num_urllc)
+    print("-- Training SAC (frame-level) ", mode, " --")
+    if mode == "fm":
+        avg_rewards, actor_losses, critic_losses, sac_model_path = train_sac(frame_env, sac_agent, numepSAC)
+    else:
+        avg_rewards, actor_losses, critic_losses, sac_model_path = train_sacBM(frame_env, sac_agent, numepSAC)
+    #plot_SACtraining_curves(avg_rewards, num_rus, envs[0].num_slices, envs[0].num_urllc)
+    #plot_SACactorlosstraining_curves(actor_losses, num_rus, envs[0].num_slices, envs[0].num_urllc)
+    #plot_SACcriticlosstraining_curves(critic_losses, num_rus, envs[0].num_slices, envs[0].num_urllc)
 
     print("Training complete.")
     #return embb_models_path, urllc_models_path, sac_model_path

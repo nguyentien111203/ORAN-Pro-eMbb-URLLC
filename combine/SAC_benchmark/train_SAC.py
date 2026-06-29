@@ -1,7 +1,8 @@
 import numpy as np
 from tqdm import trange
+import torch
 
-def train_sac(env, agent, num_episodes):
+def train_sacBM(env, agent, num_episodes):
     avg_rewards = []
     actor_losses = []
     critic_losses = []

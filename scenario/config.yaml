@@ -1,0 +1,22 @@
+# config.yaml
+
+network:
+  num_rus: 3
+  ues_per_ru: 24
+
+mobility:
+  stable:
+    speed_min: 0
+    speed_max: 0
+    r_min: 500
+    r_max: 1000
+  low:
+    speed_min: 1
+    speed_max: 5
+    r_min: 500
+    r_max: 1000
+  high:
+    speed_min: 10
+    speed_max: 20
+    r_min: 500
+    r_max: 1000
