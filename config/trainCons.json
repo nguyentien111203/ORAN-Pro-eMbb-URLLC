@@ -1,6 +1,6 @@
 {
     "forDQN": {
-            "comment": "Chinh learning_rate, lr, gamma, eps, train_episodes",   
+            "comment": "Chỉnh learning_rate, lr, gamma, eps, train_episodes",   
         "device": "cpu",
         "lr": 1e-4,
         "gamma": 0.99,
@@ -11,7 +11,7 @@
         "dqn_train_episodes": 500
     },
     "forSAC": {
-            "comment": "Chinh gamma, train_episodes, lr, tau, ..._lr, khong chinh action_...",
+            "comment": "Chỉnh gamma, train_episodes, lr, tau, ..._lr, không chỉnh action_...",
         "action_scale": 1.0,
         "action_bias": 0.0,
         "device": "cpu",                 

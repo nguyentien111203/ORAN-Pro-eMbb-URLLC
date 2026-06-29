@@ -63,17 +63,23 @@ class SACAgent:
 
         # 2. Forward qua Actor
         with torch.no_grad():
-            action_sample, _, _ = self.actor.sample(state) 
-            raw_action = (action_sample + 1) / 2
+            action_sample, _, _ = self.actor.sample(state) # "action_sample" có giá trị nằm trong khoảng [-1,1]
+            raw_action = (action_sample + 1) / 2           # "raw_action" phép toán này tịnh tiến "action_sample" về khoảng [0,1] phù hợp ý nghĩa tính %
             raw_action = raw_action * self.action_scale + self.action_bias
 
         # 3. Reshape về cấu hình [R, B, S] 
         action = raw_action.reshape((self.num_rus, max(self.num_bwp_ru), self.num_slices))
-
+            # "reshape" chuyển vector 1D  thành 3 dimensonals matrix.Đây chính là cấu trúc BWP_slice[RU][BWP][slice] mà bạn cần quản lý.
+            
         # 4. Softmax per BWP
+        '''
+        Đoạn code này có nhiệm vụ ép buộc tổng tỷ lệ tài nguyên chia cho các Slices bên trong một BWP 
+        luôn đạt mức 100% (1.0), không bị hụt và cũng không được vượt quá giới hạn tài nguyên của BWP đó.
+        '''
         for r in range(action.shape[0]):      
             for b in range(action.shape[1]):  
                 action[r, b] = torch.softmax(action[r, b].clone(), dim=0)
+                # Softmax ép tất cả các phần tử mang giá trị từ [0,1], và tổng của chúng phải bằng chính xác 1.0.
 
         # 5. Action Smoothing
         if last_action is not None:

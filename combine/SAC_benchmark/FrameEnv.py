@@ -86,11 +86,11 @@ class FrameEnv(gym.Env):
                     for u in range(len(self.urllc_slices[s].ue_set)):
                         # Tích lũy độ trễ (URLLC)
                         URLLC_frame[s][u] += min(urllc_Lat[s][u], 1.0)
-                        # Tích lũy 4 loại chi phí phạt
-                        costEne[slot_index] += info["costE"]
-                        costFrag[slot_index] += info["costF"]
-                        costSwit[slot_index] += info["costS"]
-                        costGB[slot_index] += info["costGB"]
+                # Tích lũy 4 loại chi phí phạt
+                costEne[slot_index] += info["costE"]
+                costFrag[slot_index] += info["costF"]
+                costSwit[slot_index] += info["costS"]
+                costGB[slot_index] += info["costGB"]
                     
         eMBB_frame = [x / (self.frame_slots + 1e-9) for x in eMBB_frame]; URLLC_frame = [x / (self.frame_slots + 1e-9) for x in URLLC_frame]
         embb_avg = sum(np.clip(ratio, 0.0, 2.0) for s in range(self.num_embb) for ratio in eMBB_frame[s])

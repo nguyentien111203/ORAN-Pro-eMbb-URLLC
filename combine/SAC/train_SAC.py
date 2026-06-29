@@ -1,3 +1,4 @@
+import torch
 import numpy as np
 from tqdm import trange
 
@@ -59,4 +60,11 @@ def train_sac(env, agent, num_episodes):
         avg_rewards.append(ep_reward)
 
     sac_model_path = "sac_model.pth"
+    # Lưu trọng số của mô hình sau khi train xong
+    torch.save({
+        'actor': agent.actor.state_dict(),
+        'critic_1': agent.critic_1.state_dict(),
+        'critic_2': agent.critic_2.state_dict(),
+        'alpha': agent.alpha
+    }, sac_model_path)
     return avg_rewards, actor_losses, critic_losses, sac_model_path

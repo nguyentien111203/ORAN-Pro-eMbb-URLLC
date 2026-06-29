@@ -35,9 +35,22 @@ class FrameEnv(gym.Env):
         self.debug_ep_count = 0 
 
     def reset(self):
-        for env in self.RU_envs: env.reset()
+        # 1. Khởi động lại tất cả các môi trường trạm thu phát (RU)
+        for env in self.RU_envs: 
+            env.reset()
+            
+        # 2. Đặt lại bộ đếm slot về 0 (Frame/Slot)
         self.slot_count = 0
-        return self.get_state([np.zeros(len(s.ue_set)) for s in self.embb_slices], [np.zeros(len(s.ue_set)) for s in self.urllc_slices], np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1))
+        
+        # 3. Trả về trạng thái (state) khởi tạo ban đầu
+        return self.get_state(
+            [np.zeros(len(s.ue_set)) for s in self.embb_slices],        #Chưa có thông lượng (Throughput) cho các người dùng eMBB.
+            [np.zeros(len(s.ue_set)) for s in self.urllc_slices],       #Chưa có độ trễ (Latency) nào cho các người dùng URLLC.
+            np.zeros(1),                                                #Bốn thông số chi phí phạt (cost) ban đầu đều bằng 0 (Energy, Fragmentation, Switching, GuardBand).
+            np.zeros(1), 
+            np.zeros(1), 
+            np.zeros(1)
+    )
 
     def step(self, action):
         self.resetAlloc()
@@ -67,12 +80,18 @@ class FrameEnv(gym.Env):
                 for s in range(self.num_embb):
                     for e in range(len(self.embb_slices[s].ue_set)):
                         req_thr = getattr(self.embb_slices[s].ue_set[e], 'min_thr', 10.0)
+                        # Tích lũy thông lượng (eMBB)
                         eMBB_frame[s][e] += min(eMBB_Thr_actual[s][e] / (req_thr + 1e-9), 1.0)
                 for s in range(self.num_urllc):
                     for u in range(len(self.urllc_slices[s].ue_set)):
+                        # Tích lũy độ trễ (URLLC)
                         URLLC_frame[s][u] += min(urllc_Lat[s][u], 1.0)
-                costEne[slot_index] += info["costE"]; costFrag[slot_index] += info["costF"]; costSwit[slot_index] += info["costS"]; costGB[slot_index] += info["costGB"]
-
+                # Tích lũy 4 loại chi phí phạt
+                costEne[slot_index] += info["costE"]
+                costFrag[slot_index] += info["costF"]
+                costSwit[slot_index] += info["costS"]
+                costGB[slot_index] += info["costGB"]
+                    
         eMBB_frame = [x / (self.frame_slots + 1e-9) for x in eMBB_frame]; URLLC_frame = [x / (self.frame_slots + 1e-9) for x in URLLC_frame]
         embb_avg = sum(np.clip(ratio, 0.0, 2.0) for s in range(self.num_embb) for ratio in eMBB_frame[s])
         urllc_avg = sum(np.clip(2.0 - ratio, 0.0, 2.0) for s in range(self.num_urllc) for ratio in URLLC_frame[s])
@@ -90,4 +109,10 @@ class FrameEnv(gym.Env):
         if self.slot_count == 0 and self.last_BWP_slice is not None: self.BWP_slice = copy.deepcopy(self.last_BWP_slice)
     
     def get_state(self, eMBB_frame, URLLC_frame, costEne, costFrag, costSwit, costGB):
-        return np.concatenate([ [np.min(eMBB_frame[s]) for s in range(self.num_embb)], [np.max(URLLC_frame[s]) for s in range(self.num_urllc)], [np.average(costEne)/self.scale_max[0], np.average(costFrag)/self.scale_max[1], np.average(costSwit)/self.scale_max[2], np.average(costGB)/self.scale_max[3]]]).astype(np.float32)
+        return np.concatenate([
+            [np.min(eMBB_frame[s]) for s in range(self.num_embb)],  # Trường hợp xấu nhất của eMBB
+            [np.max(URLLC_frame[s]) for s in range(self.num_urllc)], # Trường hợp xấu nhất của URLLC
+            # phép chia cho hằng số "scale_max" giúp nén giá trị tính toán về khoảng [0,1].
+            # Mạng neurol học nhanh và ổn định nhất khi dữ liệu vào nằm trong khoảng [0,1]
+            [np.average(costEne)/self.scale_max[0], np.average(costFrag)/self.scale_max[1], np.average(costSwit)/self.scale_max[2], np.average(costGB)/self.scale_max[3]]
+        ]).astype(np.float32)

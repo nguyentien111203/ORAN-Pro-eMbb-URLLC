@@ -407,6 +407,7 @@ if __name__ == "__main__":
     )
     # Load model đã train cho framework
     ck_main = torch.load("./sac_model.pth", map_location="cpu")
+
     sac_agent.actor.load_state_dict(ck_main["actor"])
     sac_agent.critic_1.load_state_dict(ck_main["critic_1"])
     sac_agent.critic_2.load_state_dict(ck_main["critic_2"])
@@ -432,12 +433,13 @@ if __name__ == "__main__":
         trainCons["forSAC"]
     )
     # Load model đã train cho benchmark (dùng chung file nếu chưa có file riêng)
-    ck_bm = torch.load("./sac_model.pth", map_location="cpu")
+    ck_bm = torch.load("./sac_model_benchmark.pth", map_location="cpu")
+    
     sac_agent2.actor.load_state_dict(ck_bm["actor"])
     sac_agent2.critic_1.load_state_dict(ck_bm["critic_1"])
     sac_agent2.critic_2.load_state_dict(ck_bm["critic_2"])
     sac_agent2.actor.eval()
-    print("[INFO] Đã load sac_model.pth cho benchmark")
+    print("[INFO] Đã load sac_model_benchmark.pth cho benchmark")
 
     # 6. Chạy đánh giá
     results_main, results_bm = evaluate_scenario(
