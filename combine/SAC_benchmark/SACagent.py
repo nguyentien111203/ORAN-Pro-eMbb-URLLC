@@ -5,7 +5,7 @@ import numpy as np
 from combine.common.common import MLP, GaussianPolicy, ReplayBuffer
 
 
-class SACAgent:
+class SACAgentBM:
     def __init__(self, state_dim, num_rus, num_bwp_ru, num_slices, train_cons):
         self.state_dim = state_dim
         self.num_rus = num_rus

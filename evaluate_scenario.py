@@ -97,17 +97,20 @@ def evaluate_scenario(
 
         # ------------------------------------------------------------------
         # Bước 2: Reset môi trường, lấy state ban đầu cho SAC
+        # FrameEnv.reset() mới không return state, nên tự tạo vector 0
         # ------------------------------------------------------------------
-        state_main = frame_env_main.reset()
-        state_bm   = frame_env_bm.reset()
+        frame_env_main.reset()
+        frame_env_bm.reset()
+        state_main = np.zeros(frame_env_main.state_dim, dtype=np.float32)
+        state_bm   = np.zeros(frame_env_bm.state_dim, dtype=np.float32)
 
         # ------------------------------------------------------------------
         # Bước 3: SAC sinh action (budget) cho cả frame
-        # last_action=None ở frame đầu, sau đó truyền action frame trước
-        # để action smoothing hoạt động đúng như lúc training
+        # framework (SACAgent mới) không còn dùng last_action,
+        # benchmark (SACAgentBM) vẫn cần last_action cho action smoothing
         # ------------------------------------------------------------------
-        action_main = sac_agent.select_action(state_main, last_action=last_action_main)
-        action_bm   = sac_agent2.select_action(state_bm,  last_action=last_action_bm)
+        action_main = sac_agent.select_action(state_main)
+        action_bm   = sac_agent2.select_action(state_bm, last_action_bm)
 
         # Tính slice_budget từ quota SAC
         budget_main = _calc_slice_budget(action_main, RUs, num_embb + num_urllc, total_prb_system)
@@ -256,7 +259,7 @@ def _run_frame(frame_env, sac_action, frame_slots, num_embb, num_urllc, results)
 
         # Ghi nhận KPI của slot này
         results["throughput"].append(slot_throughput)
-        results["latency"].append(np.mean(slot_latency) if slot_latency else 0.0)
+        results["latency"].extend(slot_latency)  # add hết các thành phần, không trung bình
         results["energy_cost"].append(slot_energy)
         results["fragment_cost"].append(slot_fragment)
         results["switch_cost"].append(slot_switch)
@@ -361,7 +364,7 @@ if __name__ == "__main__":
     from combine.general.train_general import buildEnvAgent
     from combine.SAC.SACagent      import SACAgent      as SACAgent_main
     from combine.SAC.FrameEnv      import FrameEnv      as FrameEnv_main
-    from combine.SAC_benchmark.SACagent import SACAgent as SACAgent_bm
+    from combine.SAC_benchmark.SACagent import SACAgentBM as SACAgent_bm
     from combine.SAC_benchmark.FrameEnv import FrameEnv as FrameEnv_bm
 
     print("=== Evaluate Scenario ===\n")
@@ -400,7 +403,7 @@ if __name__ == "__main__":
         frame_env_main_base.H, consta["w_reward"], scale_max, consta["frame_slots"]
     )
     sac_agent = SACAgent_main(
-        4 + len(urllc_slices) + len(embb_slices),
+        5 + 4 * (len(urllc_slices) + len(embb_slices)),
         len(RUs), num_bwp_ru,
         len(urllc_slices) + len(embb_slices),
         trainCons["forSAC"]
@@ -454,5 +457,6 @@ if __name__ == "__main__":
 
     print(f"\n=== Hoàn thành! ===")
     print(f"  Throughput trung bình : {np.mean(results_main['throughput']):.4f}")
-    print(f"  Latency trung bình    : {np.mean(results_main['latency']):.4f}")
+    print(f"  Latency (số mẫu)      : {len(results_main['latency'])}")
+    print(f"  Latency trung bình    : {np.mean(results_main['latency']):.6f}")
     print(f"  Plots: ./Figures/evaluate/")

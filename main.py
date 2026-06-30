@@ -1,5 +1,7 @@
 import matplotlib
-matplotlib.use('Agg') 
+matplotlib.use('Agg')
+import logging
+logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR) 
 
 from input.takeInput import load_cons_from_json
 from input.genInput import generate_pipeline_inputs, calculateScaleMax, generate_h_matrix

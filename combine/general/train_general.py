@@ -42,7 +42,7 @@ def buildEnvAgent(RUs, arg1_slices, arg2_slices, H, inter_RU, inter_factor, N0, 
 
     for r in range(len(RUs)):
         ru_env = RU_Env(
-            RUs[r], embb_slices, urllc_slices, num_embb, num_urllc, fixed_H[r][0], 
+            RUs[r], embb_slices, urllc_slices, fixed_H[r][0], 
             inter_RU, inter_factor, N0, w_reward, cost_switch, 
             cost_gb, scale_max, train_cons["forDQN"], frame_slots
         )
@@ -52,7 +52,7 @@ def buildEnvAgent(RUs, arg1_slices, arg2_slices, H, inter_RU, inter_factor, N0, 
             ru_env.state_dim, num_slices_combined, num_ue_combined, 
             len(RUs[r].bwps), train_cons["forDQN"]
         )
-        ru_env.assign_dqn_agent(dqn_agent)
+        ru_env.assign_agent(dqn_agent)
         ru_dqn_agents.append(dqn_agent)
 
     num_bwp_ru = [len(RUs[r].bwps) for r in range(len(RUs))]
@@ -60,13 +60,23 @@ def buildEnvAgent(RUs, arg1_slices, arg2_slices, H, inter_RU, inter_factor, N0, 
     frame_env = FrameEnv(RUs, ru_envs, urllc_slices, embb_slices, fixed_H, w_reward, scale_max, frame_slots)
     
     sac_agent = SACAgent(
-        4 + len(urllc_slices) + len(embb_slices), len(RUs), 
+        5 + 4 * (len(urllc_slices) + len(embb_slices)), len(RUs), 
         num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"]
     )
 
     return ru_envs, ru_dqn_agents, frame_env, sac_agent
 
+
 def alternating_training(num_rus, ru_envs, ru_dqn_agents, frame_env, sac_agent, numepDQN, numepSAC):
+    """
+    Train DQN trước (slot-level, độc lập per-RU), sau đó train SAC (frame-level).
+
+    Với RU_Env mới, step() cần 4 tham số (totalLatRate, totalThrRate, latSoft, thrSoft)
+    thay vì (eMBB_Thr, numBit_urllc) như cũ. Các giá trị này được tự tính ngay sau
+    computeOutput() dựa trên yêu cầu QoS của từng UE (min_thr cho eMBB, max_lat cho URLLC),
+    không cần phụ thuộc vào FrameEnv — phù hợp để train DQN độc lập trước SAC.
+    """
+    # Budget mặc định: chia đều PRB cho các slice (vì SAC chưa train ở giai đoạn này)
     BWP_slice = [[[frame_env.RUs[r].bwps[b].num_prb / frame_env.num_slices 
                    for b in range(len(frame_env.RUs[r].bwps))] 
                   for _ in range(frame_env.num_slices)] for r in range(num_rus)]
@@ -79,30 +89,61 @@ def alternating_training(num_rus, ru_envs, ru_dqn_agents, frame_env, sac_agent, 
         for r in range(num_rus):
             env   = ru_envs[r]
             agent = ru_dqn_agents[r]
-            
-            state     = env.reset()
-            done      = False
+
+            # RU_Env.reset() mới không trả về gì, state ban đầu = vector 0
+            env.reset()
+            state = np.zeros(env.state_dim, dtype=np.float32)
+
             ep_reward = 0.0
             ep_loss   = 0.0
             steps     = 0
-            
-            while not done:
+
+            # Dùng for cố định số slot trong 1 frame thay vì while not done,
+            # vì index_subframe bị reset về 0 ngay trong step() (chủ ý của anh Tiến,
+            # dùng để check sang frame mới, không phải điều kiện dừng episode)
+            for slot in range(env.frame_slots):
                 action = agent.select_action(state, BWP_slice[r])
-                
-                
-                eMBB_Thr, numBit_urllc = env.computeOutput(action)
-                next_state, reward, done, info = env.step(eMBB_Thr, numBit_urllc)
-                
+
+                flatBit, flatThr = env.computeOutput(action)
+
+                # ----- Tự tính 4 tham số cho RU_Env.step() (độc lập, không cần FrameEnv) -----
+                # totalLatRate / latSoft: tỷ lệ latency thực tế so với ngưỡng max_lat (URLLC)
+                lat_rates = []
+                for s in range(env.num_urllc):
+                    for u in range(env.num_urllc_ue[s]):
+                        max_lat = getattr(env.urllc_slices[s].ue_set[u], 'max_lat', 1.0)
+                        pkt_size = getattr(env.urllc_slices[s].ue_set[u], 'packet_size', 100)
+                        idx = sum(env.num_urllc_ue[:s]) + u
+                        numBit = flatBit[idx] if idx < len(flatBit) else 1e-9
+                        latency = pkt_size / (numBit + 1e-9)
+                        lat_rates.append(latency / (max_lat + 1e-9))
+                lat_rates = np.array(lat_rates, dtype=np.float32)
+                lat_soft = np.clip(lat_rates, 0.0, 1.0)
+
+                # totalThrRate / thrSoft: tỷ lệ throughput thực tế so với min_thr (eMBB)
+                thr_rates = []
+                for s in range(env.num_embb):
+                    for u in range(env.num_embb_ue[s]):
+                        min_thr = getattr(env.embb_slices[s].ue_set[u], 'min_thr', 1.0)
+                        idx = sum(env.num_embb_ue[:s]) + u
+                        thr = flatThr[idx] if idx < len(flatThr) else 0.0
+                        thr_rates.append(thr / (min_thr + 1e-9))
+                thr_rates = np.array(thr_rates, dtype=np.float32)
+                thr_soft = np.clip(thr_rates, 0.0, 1.0)
+
+                next_state, reward, _, info = env.step(lat_rates, thr_rates, lat_soft, thr_soft)
+                done = (slot == env.frame_slots - 1)
+
                 agent.store_transition(state, action, reward, next_state, done)
                 loss = agent.optimize_model()
-                
+
                 if loss is not None:
                     ep_loss += loss
                     steps   += 1
-                
+
                 ep_reward += reward
                 state = next_state
-            
+
             agent.eps = max(agent.eps_end, agent.eps * agent.eps_decay)
             all_dqn_rewards[r].append(ep_reward)
             all_dqn_losses[r].append(ep_loss / max(steps, 1))

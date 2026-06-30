@@ -7,6 +7,14 @@ from combine.common.common import MLP, GaussianPolicy, ReplayBuffer
 
 class SACAgent:
     def __init__(self, state_dim, num_rus, num_bwp_ru, num_slices, train_cons):
+        """
+        Agent cho SAC
+        int state_dim : số chiều của state
+        int num_rus : số RU
+        list(int) num_bwp_ru : số BWP mỗi RU 
+        int num_slices : số slice
+        """
+
         self.state_dim = state_dim
         self.num_rus = num_rus
         self.num_bwp_ru = num_bwp_ru
@@ -21,7 +29,7 @@ class SACAgent:
         self.actor_lr = train_cons["actor_lr"]
         self.critic_lr = train_cons["critic_lr"]
         self.alpha_lr = train_cons["alpha_lr"]
-        self.batch_size = train_cons.get("batch_size", 64)
+
         self.action_dim = np.sum(num_bwp_ru) * num_slices
 
         # --- Actor & Critics
@@ -29,6 +37,7 @@ class SACAgent:
                                     action_scale=self.action_scale,
                                     action_bias=self.action_bias).to(self.device)
 
+        # Critics Q1, Q2
         q_input_dim = state_dim + self.action_dim  
         self.critic_1 = MLP(q_input_dim, 1).to(self.device)
         self.critic_1.init_weights()
@@ -39,6 +48,7 @@ class SACAgent:
         self.target_critic_2 = MLP(q_input_dim, 1).to(self.device)
         self.target_critic_2.init_weights()
 
+        # copy weights to targets
         self.target_critic_1.load_state_dict(self.critic_1.state_dict())
         self.target_critic_2.load_state_dict(self.critic_2.state_dict())
 
@@ -46,73 +56,80 @@ class SACAgent:
         self.critic_1_opt = optim.Adam(self.critic_1.parameters(), lr=self.critic_lr)
         self.critic_2_opt = optim.Adam(self.critic_2.parameters(), lr=self.critic_lr)
 
+        # --- Replay buffer (same as before)
         self.replay_buffer = ReplayBuffer(forSAC=True)
 
+        # --- Entropy tuning (correct, register log_alpha as Parameter)
         self.target_entropy = -float(self.action_dim)
+
         init_alpha = float(self.alpha) if hasattr(self, "alpha") else float(0.3)
+        # register as nn.Parameter so it's in model.parameters()/state_dict()
         self.log_alpha = torch.nn.Parameter(
             torch.tensor(np.log(init_alpha), dtype=torch.float32, device=self.device)
         )
+        # scalar float for immediate use in ops
         self.alpha = float(self.log_alpha.exp().item())
+
+        # optimizer for log_alpha
         self.alpha_opt = optim.Adam([self.log_alpha], lr=self.alpha_lr)
 
 
-    def select_action(self, state, last_action, beta=0.2):
-        # 1. Chuẩn bị state
-        state = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+    def select_action(self, state):
 
-        # 2. Forward qua Actor
+        num_ru = self.num_rus
+        num_slices = self.num_slices
+
+
+        state_t = torch.as_tensor(
+            state,
+            dtype=torch.float32,
+            device=self.device
+        ).unsqueeze(0)
+
         with torch.no_grad():
-            action_sample, _, _ = self.actor.sample(state) # "action_sample" có giá trị nằm trong khoảng [-1,1]
-            raw_action = (action_sample + 1) / 2           # "raw_action" phép toán này tịnh tiến "action_sample" về khoảng [0,1] phù hợp ý nghĩa tính %
-            raw_action = raw_action * self.action_scale + self.action_bias
+            action, _, _ = self.actor.sample(state_t)
 
-        # 3. Reshape về cấu hình [R, B, S] 
-        action = raw_action.reshape((self.num_rus, max(self.num_bwp_ru), self.num_slices))
-            # "reshape" chuyển vector 1D  thành 3 dimensonals matrix.Đây chính là cấu trúc BWP_slice[RU][BWP][slice] mà bạn cần quản lý.
-            
-        # 4. Softmax per BWP
-        '''
-        Đoạn code này có nhiệm vụ ép buộc tổng tỷ lệ tài nguyên chia cho các Slices bên trong một BWP 
-        luôn đạt mức 100% (1.0), không bị hụt và cũng không được vượt quá giới hạn tài nguyên của BWP đó.
-        '''
-        for r in range(action.shape[0]):      
-            for b in range(action.shape[1]):  
-                action[r, b] = torch.softmax(action[r, b].clone(), dim=0)
-                # Softmax ép tất cả các phần tử mang giá trị từ [0,1], và tổng của chúng phải bằng chính xác 1.0.
+        action = action.squeeze(0).cpu().numpy()
 
-        # 5. Action Smoothing
-        if last_action is not None:
-            if isinstance(last_action, list):
-                last_tensor = torch.zeros_like(action)
-                # Map list-based state to tensor
-                for r in range(len(last_action)):
-                    if len(last_action[r]) == self.num_slices: 
-                        for s in range(self.num_slices):
-                            for b in range(len(last_action[r][s])):
-                                if b < action.shape[1]: last_tensor[r, b, s] = last_action[r][s][b]
-                    else: 
-                        for b in range(len(last_action[r])):
-                            for s in range(len(last_action[r][b])):
-                                if b < action.shape[1]: last_tensor[r, b, s] = last_action[r][b][s]
-            else:
-                last_tensor = torch.as_tensor(last_action, dtype=torch.float32, device=self.device)
+        BWP_slice = [
+            [
+                [0.0 for _ in range(self.num_slices)]
+                for _ in range(self.num_bwp_ru[r])
+            ]
+            for r in range(num_ru)
+        ]
+        idx = 0
 
-            # ========================================================
-            # FIX LỖI BROADCASTING TRIỆT ĐỂ: 
-            # Ép last_tensor về đúng shape của action hiện tại
-            # ========================================================
-            last_tensor = last_tensor.view(action.shape)
-            
-            action = (1 - beta) * action + beta * last_tensor
+        for r in range(num_ru):
+            for b in range(self.num_bwp_ru[r]):
+                # lấy action của slice trên RU-BWP này
+                raw = action[
+                    idx:
+                    idx + num_slices
+                ]
+                idx += num_slices
+                # tránh âm do tanh / Gaussian policy
+                raw = np.maximum(raw, 0)
+                total = np.sum(raw)
+                # chuẩn hóa nếu vượt budget
+                if total > 1.0:
+                    raw = raw / total
+                for s in range(num_slices):
+                    BWP_slice[r][b][s] = raw[s]
 
-        return action.detach().cpu().numpy()
-
+        return BWP_slice
 
     def update(self, step, policy_delay, last_actor_loss, batch_size, debug=False):
+        """
+        Stable SAC update with per-dim entropy tuning.
+        Returns: actor_loss_scalar (float), critic_loss_scalar (float), updated_last_actor_loss (torch.Tensor scalar)
+        """
         if len(self.replay_buffer) < batch_size:
             return 0.0, 0.0, last_actor_loss
 
+        # ----------------------------
+        # Sample batch and convert to tensors
+        # ----------------------------
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
         states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
         actions = torch.as_tensor(actions, dtype=torch.float32, device=self.device)
@@ -120,10 +137,15 @@ class SACAgent:
         next_states = torch.as_tensor(next_states, dtype=torch.float32, device=self.device)
         dones = torch.as_tensor(dones, dtype=torch.float32, device=self.device)
 
-        alpha_val = float(self.log_alpha.exp().clamp(1e-8, 10.0).detach())
+        # local alpha value (do NOT mutate self.alpha here)
+        alpha_val = float(self.log_alpha.exp().clamp(1e-8, 10.0))
 
+        # ----------------------------
+        # 1) Compute target Q value (use next actions)
+        # ----------------------------
         with torch.no_grad():
-            next_actions, next_log_pi, _ = self.actor.sample(next_states)
+            next_actions, next_log_pi, _ = self.actor.sample(next_states)  # next_log_pi expected [B,1] (sum)
+            # ensure shape and clamp for safety
             next_log_pi = next_log_pi.view(-1, 1).clamp(min=-100.0, max=100.0)
 
             target_q1 = self.target_critic_1(torch.cat([next_states, next_actions], dim=-1))
@@ -133,20 +155,33 @@ class SACAgent:
             target_q = target_q_min - alpha_val * next_log_pi
             target_q = rewards + (1.0 - dones) * self.gamma * target_q
 
+            # optional clamp if you keep seeing huge numbers (uncomment while debugging)
+            # target_q = torch.clamp(target_q, -1e6, 1e6)
+
+        # ----------------------------
+        # 2) Compute current Q and critic loss
+        # ----------------------------
         current_q1 = self.critic_1(torch.cat([states, actions], dim=-1))
         current_q2 = self.critic_2(torch.cat([states, actions], dim=-1))
+
 
         critic_loss_fn = nn.SmoothL1Loss()
         critic_1_loss = critic_loss_fn(current_q1, target_q)
         critic_2_loss = critic_loss_fn(current_q2, target_q)
         critic_loss = 0.5 * (critic_1_loss + critic_2_loss)
 
+        # Guard NaN/Inf
         if not torch.isfinite(critic_1_loss).all() or not torch.isfinite(critic_2_loss).all():
+            if debug:
+                print("Skipping update: critic loss NaN/Inf", critic_1_loss, critic_2_loss)
             return 0.0, 0.0, last_actor_loss
 
+        # ----------------------------
+        # 3) Update critics
+        # ----------------------------
         self.critic_1_opt.zero_grad(set_to_none=True)
         critic_1_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.critic_1.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(self.critic_1.parameters(), max_norm=0.5)
         self.critic_1_opt.step()
 
         self.critic_2_opt.zero_grad(set_to_none=True)
@@ -154,8 +189,16 @@ class SACAgent:
         torch.nn.utils.clip_grad_norm_(self.critic_2.parameters(), max_norm=0.5)
         self.critic_2_opt.step()
 
+        # ----------------------------
+        # 4) Actor update (delayed)
+        # ----------------------------
         actor_loss_tensor = torch.tensor(0.0, device=self.device)
+
+        # sample new actions & log_prob_sum & mean for current states
+        # IMPORTANT: sample() must return (action, log_prob_sum, mean)
         new_actions, log_pi_sum, mean = self.actor.sample(states)
+
+        # enforce correct shape and clamp
         log_pi_sum = log_pi_sum.view(-1, 1).clamp(min=-100.0, max=100.0)
 
         if step % max(1, policy_delay) == 0:
@@ -163,8 +206,10 @@ class SACAgent:
             q2_new = self.critic_2(torch.cat([states, new_actions], dim=-1))
             q_new_min = torch.min(q1_new, q2_new)
 
+            # actor objective: minimize (alpha * log_pi_sum - Q)
             actor_loss_tensor = (alpha_val * log_pi_sum - q_new_min).mean()
 
+            # small regularizers to avoid tanh saturation & very large means
             mean_penalty_coeff = 1e-4
             mean_penalty = mean.pow(2).mean() * mean_penalty_coeff
             action_penalty_coeff = 5e-4
@@ -172,10 +217,16 @@ class SACAgent:
 
             actor_loss_tensor = actor_loss_tensor + mean_penalty + action_penalty
 
+            # guards before backward
             if not torch.isfinite(actor_loss_tensor).all():
+                if debug:
+                    print("Skipping actor update: NaN/Inf actor_loss")
                 actor_loss_tensor = torch.tensor(0.0, device=self.device)
             else:
+                # clip huge actor_loss (prevent numeric explosion)
                 if torch.abs(actor_loss_tensor) > 1e6:
+                    if debug:
+                        print("Clamping huge actor_loss before backward:", float(actor_loss_tensor.item()))
                     actor_loss_tensor = actor_loss_tensor.clamp(-1e6, 1e6)
 
                 self.actor_opt.zero_grad(set_to_none=True)
@@ -183,10 +234,12 @@ class SACAgent:
                 torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=0.5)
                 self.actor_opt.step()
 
+            # save last actor loss as detached scalar tensor
             last_actor_loss = actor_loss_tensor.detach().clone()
             if last_actor_loss.dim() != 0:
                 last_actor_loss = last_actor_loss.mean().detach()
         else:
+            # reuse last_actor_loss for logging only
             if isinstance(last_actor_loss, torch.Tensor):
                 actor_loss_tensor = last_actor_loss.detach().clone().to(self.device)
                 if actor_loss_tensor.dim() != 0:
@@ -194,12 +247,17 @@ class SACAgent:
             else:
                 actor_loss_tensor = torch.tensor(float(last_actor_loss), device=self.device)
 
+        # ----------------------------
+        # 5) Dynamic target entropy & Alpha update (per-dim)
+        # ----------------------------
+        # compute per-dim log-prob from the current summed log prob
         log_pi_per_dim = (log_pi_sum / float(self.action_dim)).clamp(min=-10.0, max=5.0)
 
         with torch.no_grad():
             avg_per_dim_ent = -log_pi_per_dim.mean().item()
             self.target_entropy = -0.1 * float(np.tanh(avg_per_dim_ent))
 
+        # clamp log_alpha (in-place) then compute alpha loss using per-dim log-prob
         with torch.no_grad():
             self.log_alpha.data.clamp_(-16.0, 2.0)
 
@@ -210,12 +268,37 @@ class SACAgent:
         alpha_loss.backward()
         self.alpha_opt.step()
 
+        # update scalar alpha for use elsewhere (consistent with alpha_val usage)
         self.alpha = float(self.log_alpha.exp().clamp(1e-8, 10.0).item())
 
+        # ----------------------------
+        # 6) Soft target update
+        # ----------------------------
         with torch.no_grad():
             for t_param, param in zip(self.target_critic_1.parameters(), self.critic_1.parameters()):
                 t_param.copy_(t_param * (1.0 - self.tau) + param * self.tau)
             for t_param, param in zip(self.target_critic_2.parameters(), self.critic_2.parameters()):
                 t_param.copy_(t_param * (1.0 - self.tau) + param * self.tau)
 
+        # ----------------------------
+        # 7) Debugging & return
+        # ----------------------------
+        if debug:
+            try:
+                stats = {
+                    "actor_loss": float(actor_loss_tensor.item()),
+                    "critic_loss": float(critic_loss.item()),
+                    "Q_cur_mean": float(current_q1.mean().item()),
+                    "target_Q_mean": float(target_q.mean().item()),
+                    "alpha": float(self.alpha),
+                    "log_pi_sum_mean": float(log_pi_sum.mean().item()),
+                    "log_pi_per_dim_mean": float(log_pi_per_dim.mean().item())
+                }
+                print("SAC update stats:", stats)
+                if log_pi_sum.mean().item() > 0:
+                    print("WARNING: log_pi_sum > 0 (should not happen):", log_pi_sum.mean().item())
+            except Exception:
+                pass
+
         return float(actor_loss_tensor.item()), float(critic_loss.item()), last_actor_loss
+

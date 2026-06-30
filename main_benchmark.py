@@ -3,8 +3,8 @@ matplotlib.use('Agg')
 from input.takeInput import load_cons_from_json
 from input.genInput import generate_pipeline_inputs, calculateScaleMax, generate_h_matrix
 from combine.general.train_general import buildEnvAgent
-from combine.SAC_benchmark.train_SAC import train_sac
-from combine.SAC_benchmark.SACagent import SACAgent
+from combine.SAC_benchmark.train_SAC import train_sacBM as train_sac
+from combine.SAC_benchmark.SACagent import SACAgentBM as SACAgent
 from combine.SAC_benchmark.FrameEnv import FrameEnv
 
 def main():
