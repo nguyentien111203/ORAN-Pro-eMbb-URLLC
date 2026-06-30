@@ -10,7 +10,8 @@ from combine.utils.pltSAC import plot_SACtraining_curves, plot_SACcriticlosstrai
 from combine.utils.plotDQN import plot_DQNtraining_curves, plot_DQNlosstraining_curves
 from combine.general.DQN_general import RU_Env
 
-def buildEnvAgent(RUs, arg1_slices, arg2_slices, H, inter_RU, inter_factor, N0, w_reward, cost_switch, cost_gb, scale_max, train_cons, frame_slots):
+def buildEnvAgent(RUs, arg1_slices, arg2_slices, H, inter_RU, inter_factor, N0, w_reward, 
+                  cost_switch, cost_gb, scale_max, train_cons, frame_slots, mode):
     
     is_embb_first = "embb" in arg1_slices[0].id.lower()
     if is_embb_first:

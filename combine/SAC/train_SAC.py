@@ -4,7 +4,7 @@ from tqdm import trange
 from collections import deque
 
 
-def train_sac(env, agent, num_episodes=300, log_interval=10, update_per_step=1, batch_size=128):
+def train_sac(env, agent, num_episodes=300, log_interval=5, update_per_step=1, batch_size=128):
     """
     Huấn luyện Soft Actor-Critic cho bài toán phân bổ công suất (Frame-level).
     env : Môi trường chung trong 1 frame
@@ -50,7 +50,7 @@ def train_sac(env, agent, num_episodes=300, log_interval=10, update_per_step=1, 
             env.vio_lat = 0
             env.avg_lat = 0
             action = agent.select_action(state)
-            next_state, reward, done, info = env.step(action)
+            next_state, reward, info, done = env.step(action)
 
             # Save transition
             agent.replay_buffer.push(state, action, reward, next_state, done)

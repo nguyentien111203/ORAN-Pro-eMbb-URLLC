@@ -21,7 +21,7 @@ def moving_average(data, window_size=50):
     # Dùng convolution để tính trung bình trượt
     return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
 
-def plot_SACtraining_curves(SAC_rewards_log, num_RU, num_slices, num_urllc):
+def plot_SACtraining_curves(SAC_rewards_log, num_RU, num_slices, num_urllc, mode):
     os.makedirs(SAVE_DIR, exist_ok=True)
     plt.figure(figsize=(8,5))
     
@@ -42,9 +42,9 @@ def plot_SACtraining_curves(SAC_rewards_log, num_RU, num_slices, num_urllc):
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
-    plt.savefig(f"./Figures/SAC/SAC_reward_convergence.png")
+    plt.savefig(f"./Figures/SAC/SAC_reward_convergence", mode, ".png")
 
-def plot_SACactorlosstraining_curves(SAC_loss_log, num_RU, num_slices, num_urllc):
+def plot_SACactorlosstraining_curves(SAC_loss_log, num_RU, num_slices, num_urllc, mode):
     os.makedirs(SAVE_DIR, exist_ok=True)
     plt.figure(figsize=(8,5))
     
@@ -56,9 +56,9 @@ def plot_SACactorlosstraining_curves(SAC_loss_log, num_RU, num_slices, num_urllc
     plt.ylabel("Loss")
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
-    plt.savefig(f"./Figures/SAC/SAC_actor_loss_convergence.png")
+    plt.savefig(f"./Figures/SAC/SAC_actor_loss_convergence", mode, ".png")
 
-def plot_SACcriticlosstraining_curves(SAC_loss_log, num_RU, num_slices, num_urllc):
+def plot_SACcriticlosstraining_curves(SAC_loss_log, num_RU, num_slices, num_urllc, mode):
     os.makedirs(SAVE_DIR, exist_ok=True)
     plt.figure(figsize=(8,5))
     
@@ -70,4 +70,4 @@ def plot_SACcriticlosstraining_curves(SAC_loss_log, num_RU, num_slices, num_urll
     plt.ylabel("Loss")
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
-    plt.savefig(f"./Figures/SAC/SAC_critic_loss_convergence.png")
+    plt.savefig(f"./Figures/SAC/SAC_critic_loss_convergence", mode,".png")

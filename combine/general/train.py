@@ -1,7 +1,7 @@
 import numpy as np
 from tqdm import trange
 from collections import deque
-from combine.DQN.drawDQN import plot_rate
+from combine.general.drawDQN import plot_rate
 
 def train_dqn(envs, agents, num_episodes, initBWP_slice):
 

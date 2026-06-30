@@ -1,120 +1,170 @@
 # Alternating training: DQN (slot-level) <-> SAC (frame-level)
 import numpy as np
 import torch
-from tqdm import trange
+from tqdm import trange, tqdm
 
 from combine.common.multiagent_DQN import MultiHeadDQNAgent
 from combine.SAC.SACagent import SACAgent
+from combine.general.env import RU_Env
 from combine.SAC.FrameEnv import FrameEnv
-from combine.SAC.train_SAC import train_sac
-from combine.utils.pltSAC import plot_SACtraining_curves, plot_SACcriticlosstraining_curves, plot_SACactorlosstraining_curves
+from combine.general.train import train_dqn
+from combine.SAC.train_SAC import train_sac 
+from combine.SAC_benchmark.train_SAC import train_sacBM
+from combine.utils.plotDQN import plot_DQNtraining_curves, plot_DQNlosstraining_curves
+from combine.utils.pltSAC import plot_SACactorlosstraining_curves, plot_SACcriticlosstraining_curves, plot_SACtraining_curves
+from combine.SAC_benchmark.SACagent import SACAgentBM
 
-# Import môi trường hợp nhất
-from combine.general.DQN_general import RU_Env
 
 def buildEnvAgent(RUs, urllc_slices, embb_slices, H, inter_RU, inter_factor, N0,
-                  w_reward, cost_switch, cost_gb, scale_max, train_cons, frame_slots):
+                  w_reward, cost_switch, cost_gb, scale_max, train_cons, frame_slots, mode):
     """
-    Dựng môi trường hợp nhất xử lý đồng thời cả 2 dịch vụ trên 1 RU duy nhất.
+    Dựng các môi trường và agent cho SAC và DQN
+    set of Radio Unit RUs : tập các RU
+    set of urllc_slices : tập các urllc slice
+    set of embb_slices : tập các embb slice
+    H : ma trận các kênh truyền
+    inter_RU : hệ số nhiễu liên RU
+    w_reward : hệ số cho hàm phần thưởng
+    cost_switch : hệ số chi phí chuyển BWP
+    cost_gb : hệ số guard band
+    scale_max : các giá trị scale theo từng thành phần trong scale_max
+    train_cons : hằng số trong training mô hình
+    mode: "bm" hoặc "fm" là benchmark hoặc là framework
+
+    giá trị trả về :
+    embb_envs, urllc_envs : tập các môi trường cho embb và urllc ở từng RU
+    embb_dqn_agents, urllc_dqn_agents : tập các agent embb và urllc ở từng RU
+    frame_env : môi trường của SAC
+    sac_agent : agent của SAC
     """
-    ru_envs = []
-    ru_dqn_agents = []
-    
-    num_urllc = len(urllc_slices)
-    num_embb = len(embb_slices)
-    
-    num_slices_combined = num_urllc + num_embb
-    num_urllc_ue = [len(s.ue_set) for s in urllc_slices]
-    num_embb_ue = [len(s.ue_set) for s in embb_slices]
-    num_ue_combined = num_embb_ue + num_urllc_ue
+    # env cho embb và urllc trong từng RU và từng DQN agents
+    envs = []
+    agents = []
+    num_urllc_ue = [len(urllc_slices[u].ue_set) for u in range(len(urllc_slices))]
+    num_embb_ue = [len(urllc_slices[u].ue_set) for u in range(len(embb_slices))]
+    num_ue = np.concatenate([num_embb_ue, num_urllc_ue])
 
     for r in range(len(RUs)):
-        # Gộp chung danh sách slices (eMBB trước, URLLC sau)
-        slices_combined = list(embb_slices) + list(urllc_slices)
+        # Khởi tạo môi trường và agent cho từng loại slice ở từng RU
+        # Kiếm tra xem số urllc thế nào
+        env = RU_Env(RUs[r], embb_slices, urllc_slices, H[r][0], 
+                    inter_RU, inter_factor, N0, w_reward, cost_switch, 
+                    cost_gb, scale_max, train_cons["forDQN"], frame_slots)
+        envs.append(env)
+        agent = MultiHeadDQNAgent(env.state_dim, len(num_ue), num_ue, len(RUs[r].bwps), train_cons["forDQN"])
+        env.assign_agent(agent)
+        agents.append(agent)
         
-        # Hợp nhất ma trận nhiễu H
-        H_urllc = H[r][0][:num_urllc]
-        H_embb = H[r][0][num_urllc:num_urllc + num_embb]
-        if isinstance(H_embb, list):
-            H_combined = H_embb + H_urllc
-        else:
-            H_combined = np.concatenate((H_embb, H_urllc), axis=0)
 
-        # Khởi tạo 1 Env duy nhất quản trị RU
-        ru_env = RU_Env(
-            RUs[r], slices_combined, num_urllc, num_embb, H_combined, 
-            inter_RU, inter_factor, N0, w_reward, cost_switch, 
-            cost_gb, scale_max, train_cons["forDQN"], frame_slots
-        )
-        ru_envs.append(ru_env)
-        
-        # Tạo Agent tập trung
-        dqn_agent = MultiHeadDQNAgent(
-            ru_env.state_dim, num_slices_combined, num_ue_combined, 
-            len(RUs[r].bwps), train_cons["forDQN"]
-        )
-        ru_env.assign_dqn_agent(dqn_agent)
-        ru_dqn_agents.append(dqn_agent)
-
+    # Frame env và SAC agent
     num_bwp_ru = [len(RUs[r].bwps) for r in range(len(RUs))]
-    
-    # Khởi tạo môi trường mức Frame
-    frame_env = FrameEnv(RUs, ru_envs, urllc_slices, embb_slices, H, w_reward, scale_max, frame_slots)
-    sac_agent = SACAgent(4 + num_slices_combined, len(RUs), num_bwp_ru, num_slices_combined, train_cons["forSAC"])
+    frame_env = FrameEnv(RUs, envs, urllc_slices, embb_slices, H, w_reward, scale_max, frame_slots)
+    if mode == "fm":
+        sac_agent = SACAgent(frame_env.state_dim, len(RUs), 
+                            num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"])
+    else:
+        sac_agent = SACAgentBM(frame_env.state_dim, len(RUs), 
+                            num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"])
 
-    return ru_envs, ru_dqn_agents, frame_env, sac_agent
+    return envs, agents, frame_env, sac_agent
 
 
-def alternating_training(num_rus, ru_envs, ru_dqn_agents, frame_env, sac_agent, numepDQN, numepSAC):
+def alternating_training(num_rus, envs, agents, 
+                         frame_env, sac_agent, numepDQN, numepSAC, mode):
     """
-    Vòng lặp huấn luyện xen kẽ tổng hợp mức Slot (DQN) và mức Frame (SAC).
+    Hàm thực hiện train mô hình và lưu
+    Input :
+    envs : tập môi trường 
+    agents : tập agent 
+    frame_env : môi trường của sac 
+    sac_agent : agent của sac
+    mode: "bm" hoặc "fm" là benchmark hoặc framework
+
+    Output :
+    models_path : tập các đường dẫn tới file lưu model dqn
+    model_path : đường dẫn tới file lưu model sac
     """
     
-    # ==========================================
-    # FIX 1: ĐẢO CHIỀU MA TRẬN BWP_slice (Thành [RU][Slice][BWP])
-    # ==========================================
-    BWP_slice = [[[frame_env.RUs[r].bwps[b].num_prb / frame_env.num_slices 
-                   for b in range(len(frame_env.RUs[r].bwps))] 
-                  for _ in range(frame_env.num_slices)] for r in range(num_rus)]
+    # Set các file chứa model
+    models_path = []
 
-    print(f"-- Đang tiến hành huấn luyện Unified DQN Agents (Slot-level) --")
-    for ep in trange(numepDQN, desc="Unified DQN Training Loop"):
-        for r in range(num_rus):
-            env = ru_envs[r]     
-            agent = ru_dqn_agents[r] 
-            
-            state = env.reset()
-            done = False
-            
-            while not done:
-                action = agent.select_action(state, BWP_slice[r])
-                totalThrRate, _, totalLatRate = env.computeOutput(action)
-                next_state, reward, done, info = env.step(totalThrRate, totalLatRate)
-                
-                agent.store_transition(state, action, reward, next_state, done)
-                agent.optimize_model()
-                state = next_state
-                
-            agent.eps = max(agent.eps_end, agent.eps * agent.eps_decay)
+    # Budget cho các slice ban đầu
+    BWP_slice = init_slice_budget(frame_env, num_rus, 1, 1)
 
-    # ==========================================
-    # FIX 2: LƯU TRỌNG SỐ CHO CÁC MẠNG DQN
-    # ==========================================
-    print("\n-- Lưu mô hình DQN --")
+    # Train DQN ở từng RU
+    print(f"-- Training DQN agents --")
+    
+    reward, losses = train_dqn(envs, agents, numepDQN, BWP_slice)
+    plot_DQNtraining_curves(reward[0], 0, envs[0].num_slices, envs[0].num_urllc)
+    plot_DQNlosstraining_curves(losses[0], 0, envs[0].num_slices, envs[0].num_urllc)
+
+    # Train SAC chung
+    print("-- Training SAC (frame-level) ", mode, " --")
+    if mode == "fm":
+        avg_rewards, actor_losses, critic_losses, sac_model_path = train_sac(frame_env, sac_agent, numepSAC)
+    else:
+        avg_rewards, actor_losses, critic_losses, sac_model_path = train_sacBM(frame_env, sac_agent, numepSAC)
+    #plot_SACtraining_curves(avg_rewards, num_rus, envs[0].num_slices, envs[0].num_urllc)
+    #plot_SACactorlosstraining_curves(actor_losses, num_rus, envs[0].num_slices, envs[0].num_urllc)
+    #plot_SACcriticlosstraining_curves(critic_losses, num_rus, envs[0].num_slices, envs[0].num_urllc)
+
+    print("Training complete.")
+    #return embb_models_path, urllc_models_path, sac_model_path
+
+
+def init_slice_budget(frame_env, num_rus, urllc_weight=1.2, embb_weight=1.0):
+    """
+    Khởi tạo budget PRB cho SAC.
+
+    Output:
+        BWP_slice[r][s][b]
+
+    r : RU
+    s : Slice
+    b : BWP
+
+    Giá trị trả về là số PRB.
+    Tổng PRB các slice trên mỗi BWP = num_prb của BWP.
+    """
+
+    num_slices = frame_env.num_slices
+    num_embb = len(frame_env.embb_slices)
+
+    # Trọng số ưu tiên
+    weights = np.array([
+        embb_weight if s < num_embb else urllc_weight
+        for s in range(num_slices)
+    ], dtype=float)
+
+    weights /= np.sum(weights)
+
+    BWP_slice = []
+
     for r in range(num_rus):
-        dqn_model_path = f"dqn_agent_ru_{r}.pth"
-        torch.save(ru_dqn_agents[r].policy_net.state_dict(), dqn_model_path)
-        print(f"Đã lưu: {dqn_model_path}")
-    print("---------------------\n")
 
-    print("-- Đang tiến hành huấn luyện SAC (Frame-level) --")
-    avg_rewards, actor_losses, critic_losses, sac_model_path = train_sac(frame_env, sac_agent, numepSAC)
-    
-    # Save SAC Model
-    torch.save(sac_agent.actor.state_dict(), sac_model_path)
-    print(f"Đã lưu mô hình SAC tại: {sac_model_path}")
-    
-    plot_SACtraining_curves(avg_rewards, num_rus, frame_env.num_slices, frame_env.num_urllc)
-    plot_SACactorlosstraining_curves(actor_losses, num_rus, frame_env.num_slices, frame_env.num_urllc)
-    plot_SACcriticlosstraining_curves(critic_losses, num_rus, frame_env.num_slices, frame_env.num_urllc)
-    print("Hoàn thành chu kỳ huấn luyện đan xen hệ thống.")
+        # Khởi tạo [slice][bwp]
+        ru_budget = [[] for _ in range(num_slices)]
+
+        for b, bwp in enumerate(frame_env.RUs[r].bwps):
+
+            total_prb = bwp.num_prb
+
+            raw_prb = weights * total_prb
+            prb_alloc = np.floor(raw_prb).astype(int)
+
+            remain = total_prb - np.sum(prb_alloc)
+
+            if remain > 0:
+                frac = raw_prb - prb_alloc
+                idx = np.argsort(frac)[::-1]
+
+                for i in range(remain):
+                    prb_alloc[idx[i]] += 1
+
+            # Lưu theo [slice][bwp]
+            for s in range(num_slices):
+                ru_budget[s].append(int(prb_alloc[s]))
+
+        BWP_slice.append(ru_budget)
+
+    return BWP_slice

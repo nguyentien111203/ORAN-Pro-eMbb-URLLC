@@ -1,21 +1,32 @@
-# Tao ra cac Object Slice (slice_urllc_x, slide_embb_y). Moi Slide co danh sach cac UE (ue_0, ue_1, ...)
 slices:
   - id: slice_urllc_0
     type: "URLLC"
-    ue_set: "[ue_0, ue_1, ue_2, ue_3]" # Lấy là tập id của các UE
+    ue_set: "[ue_0, ue_1, ue_2, ue_3, ue_4, ue_5, ue_6, ue_7]" # Lấy là tập id của các UE
   - id: slice_urllc_1
     type: "URLLC"
-    ue_set: "[ue_4, ue_5, ue_6]" # Lấy là tập id của các UE
+    ue_set: "[ue_8, ue_9, ue_10, ue_11, ue_12, ue_13, ue_14, ue_15]" # Lấy là tập id của các UE
   - id: slice_urllc_2
     type: "URLLC"
-    ue_set: "[ue_7, ue_8, ue_9]" # Lấy là tập id của các UE
+    ue_set: "[ue_16, ue_17, ue_18, ue_19, ue_20, ue_21, ue_22, ue_23]" # Lấy là tập id của các UE
   - id: slice_urllc_3
     type: "URLLC"
-    ue_set: "[ue_10, ue_11]" # Lấy là tập id của các UE
+    ue_set: "[ue_24, ue_25, ue_26, ue_27, ue_28, ue_29, ue_30, ue_31]" # Lấy là tập id của các UE
+  - id: slice_urllc_4
+    type: "URLLC"
+    ue_set: "[ue_32, ue_33, ue_34, ue_35, ue_36, ue_37, ue_38, ue_39]" # Lấy là tập id của các UE
+  - id: slice_urllc_5
+    type: "URLLC"
+    ue_set: "[ue_40, ue_41, ue_42, ue_43, ue_44, ue_45, ue_46, ue_47]" # Lấy là tập id của các UE
+
 
   - id: slice_embb_0
     type: "eMBB"
-    ue_set: "[ue_12, ue_13, ue_14]"
+    ue_set: "[ue_48, ue_49, ue_50, ue_51, ue_52, ue_53, ue_54, ue_55]"
   - id: slice_embb_1
     type: "eMBB"
-    ue_set: "[ue_15, ue_16, ue_17]"
+    ue_set: "[ue_56, ue_57, ue_58, ue_59, ue_60, ue_61, ue_62, ue_63]"
+  - id: slice_embb_2
+    type: "eMBB"
+    ue_set: "[ue_64, ue_65, ue_66, ue_67, ue_68, ue_69, ue_70, ue_71]"
+
+

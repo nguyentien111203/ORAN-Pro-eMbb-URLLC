@@ -1,32 +1,31 @@
 rus:
   - Ru_index: ru_0
     bwps:
-      - id: bwp_0
-        num_prb: 79
-        bandindex: 1  # numerology 1
-        p_each_PRB: 5 # mW
       - id: bwp_1
-        num_prb: 52
-        bandindex: 0  # numerology 0
-        p_each_PRB: 5 # mW
+        num_prb: 106
+        bandindex: 1  # numerology 0
+        p_each_PRB: 50 # mW
+      - id: bwp_2
+        num_prb: 80
+        bandindex: 2  # numerology 0
+        p_each_PRB: 50 # mW
   - Ru_index: ru_1
     bwps:
-      - id: bwp_0
-        num_prb: 79
-        bandindex: 1  # numerology 1
-        p_each_PRB: 5 # mW
       - id: bwp_1
-        num_prb: 52
-        bandindex: 0  # numerology 0
-        p_each_PRB: 5 # mW
-
+        num_prb: 106
+        bandindex: 1  # numerology 0
+        p_each_PRB: 50 # mW
+      - id: bwp_2
+        num_prb: 80
+        bandindex: 2  # numerology 0
+        p_each_PRB: 50 # mW
   - Ru_index: ru_2
     bwps:
-      - id: bwp_0
-        num_prb: 79
-        bandindex: 1  # numerology 1
-        p_each_PRB: 5 # mW
       - id: bwp_1
-        num_prb: 52
-        bandindex: 0  # numerology 0
-        p_each_PRB: 5 # mW
+        num_prb: 106
+        bandindex: 1  # numerology 0
+        p_each_PRB: 50 # mW
+      - id: bwp_2
+        num_prb: 80
+        bandindex: 2  # numerology 0
+        p_each_PRB: 50 # mW

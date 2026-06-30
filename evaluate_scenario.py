@@ -4,6 +4,12 @@ evaluate_scenario.py
 Đánh giá một kịch bản mạng bằng 2 bộ model SAC-DQN (framework vs benchmark)
 và trả về các KPI theo từng slot.
 
+H của mỗi frame được sinh trực tiếp từ kịch bản di động (mobility) định
+nghĩa trong scenario.py: vị trí UE được khởi tạo 1 lần (generate_scenario)
+rồi cập nhật mỗi frame (update_position), channel gain được tính lại từ
+vị trí hiện tại (calculate_total_channel_gain). Không còn dùng
+generate_h_matrix (random độc lập, không có mobility thật).
+
 Cách dùng:
     from evaluate_scenario import evaluate_scenario
     results_main, results_bm = evaluate_scenario(
@@ -16,9 +22,11 @@ Cách dùng:
     )
 """
 
+import copy
 import numpy as np
 import matplotlib.pyplot as plt
-from input.genInput import generate_h_matrix
+from scenario.scenario import (generate_scenario, update_position, calculate_3gpp_pathloss, 
+                               calculate_total_channel_gain, load_and_merge_config)
 
 
 # ==============================================================================
@@ -36,10 +44,18 @@ def evaluate_scenario(
     num_frames,         # Số frame cần mô phỏng
     consta,             # Dict hằng số hệ thống (chứa frame_slots, ...)
     plot=True,
-    figure_dir="./Figures/evaluate"
+    figure_dir="./Figures/evaluate",
+    scenario_type="stable",   # "stable" | "low" | "high" (xem mobility trong scenario.py)
+    scenario_seed=None,       # seed cho lần khởi tạo vị trí UE đầu tiên
+    scenario_config=None,     # config tuỳ chỉnh cho scenario.py; None -> load_and_merge_config
+    dt=None,                  # khoảng thời gian giữa 2 frame (s), dùng để update_position
 ):
     """
     Đánh giá kịch bản mạng, trả về KPI theo từng slot cho cả 2 bộ model.
+
+    H được sinh từ kịch bản di động dùng chung cho cả framework và benchmark
+    (cùng vị trí UE tại mỗi frame), nên kết quả so sánh không bị nhiễu bởi
+    việc 2 bên thấy 2 kênh truyền khác nhau.
 
     Đầu ra
     ------
@@ -80,20 +96,53 @@ def evaluate_scenario(
     last_action_main = None
     last_action_bm   = None
 
+    # ------------------------------------------------------------------
+    # Khởi tạo kịch bản di động dùng chung cho toàn bộ evaluate.
+    # topology phải khớp với số RU thật và tổng số UE thật (embb + urllc),
+    # vì ue_set của từng slice là index toàn cục trỏ vào vị trí UE này
+    # (UE được sinh tuần tự theo sector trong generate_topology()).
+    # ------------------------------------------------------------------
+    num_ues_total = sum(num_embb_ue) + sum(num_urllc_ue)
+
+    scn_config = copy.deepcopy(
+        scenario_config or load_and_merge_config(consta.get("scenario_config_path", "config.yaml"))
+    )
+    scn_config["topology"]["num_rus"] = len(RUs)
+    scn_config["topology"]["num_ues"] = num_ues_total
+
+    if num_ues_total % len(RUs) != 0:
+        raise ValueError(
+            f"Tổng số UE ({num_ues_total}) phải chia hết cho số RU ({len(RUs)}) "
+            "để generate_topology() trong scenario.py phân bố đều UE theo sector."
+        )
+
+    mobility_scenario = generate_scenario(scenario_type, seed=scenario_seed, config=scn_config)
+
+    # dt mặc định: thời lượng 1 frame (frame_slots * slot_duration), nếu không
+    # truyền vào trực tiếp hoặc khai báo trong consta.
+    frame_dt = dt if dt is not None else consta.get(
+        "frame_duration_s", frame_slots * consta.get("slot_duration_s", 1e-3)
+    )
+
     for frame_idx in range(num_frames):
 
         # ------------------------------------------------------------------
-        # Bước 1: Sinh ma trận H mới cho frame này
+        # Bước 1: Cập nhật vị trí UE theo mobility (frame đầu dùng vị trí khởi
+        # tạo, từ frame thứ 2 trở đi UE di chuyển theo velocity/bounds).
         # ------------------------------------------------------------------
-        H = generate_h_matrix(
-            len(RUs), frame_slots,
-            num_embb + num_urllc,
-            num_urllc_ue, num_embb_ue
+        if frame_idx > 0:
+            mobility_scenario = update_position(mobility_scenario, frame_dt)
+
+        H = _build_h_from_scenario(
+            mobility_scenario, RUs, embb_slices, urllc_slices,
+            fc_ghz=scn_config["channel"]["fc_ghz"],
+            antenna_gain_dbi=scn_config["channel"]["antenna_gain_dbi"],
+            shadow_std_db=scn_config["channel"]["shadow_std_db"],
         )
 
-        # Cập nhật H vào cả 2 FrameEnv
-        _update_frame_env_H(frame_env_main, H, RUs, num_embb, num_urllc)
-        _update_frame_env_H(frame_env_bm,   H, RUs, num_embb, num_urllc)
+        # Cập nhật H vào cả 2 FrameEnv (cùng kịch bản di động -> so sánh công bằng)
+        _update_frame_env_H(frame_env_main, H)
+        _update_frame_env_H(frame_env_bm,   H)
 
         # ------------------------------------------------------------------
         # Bước 2: Reset môi trường, lấy state ban đầu cho SAC
@@ -110,7 +159,7 @@ def evaluate_scenario(
         # benchmark (SACAgentBM) vẫn cần last_action cho action smoothing
         # ------------------------------------------------------------------
         action_main = sac_agent.select_action(state_main)
-        action_bm   = sac_agent2.select_action(state_bm, last_action_bm)
+        action_bm   = sac_agent2.select_action(state_bm)
 
         # Tính slice_budget từ quota SAC
         budget_main = _calc_slice_budget(action_main, RUs, num_embb + num_urllc, total_prb_system)
@@ -123,9 +172,6 @@ def evaluate_scenario(
         results_main["resource_efficiency"].append(budget_main)
         results_bm["resource_efficiency"].append(budget_bm)
 
-        # Cập nhật last_action cho frame tiếp theo (action smoothing)
-        last_action_main = action_main
-        last_action_bm   = action_bm
 
         # ------------------------------------------------------------------
         # Bước 4: Chạy từng slot trong frame, thu thập KPI
@@ -167,26 +213,60 @@ def _empty_results():
     }
 
 
-def _update_frame_env_H(frame_env, H, RUs, num_embb, num_urllc):
+def _build_h_from_scenario(scenario, RUs, embb_slices, urllc_slices,
+                            fc_ghz, antenna_gain_dbi, shadow_std_db):
     """
-    Cập nhật H mới vào FrameEnv và tất cả RU_Env bên trong.
-    H đầu vào từ generate_h_matrix: H[r][slot][slice] với thứ tự urllc trước, embb sau.
-    RU_Env cần: H[slice][ue] với thứ tự embb trước, urllc sau (giống buildEnvAgent).
-    """
-    num_rus = len(RUs)
-    fixed_H = []
-    for r in range(num_rus):
-        H_r = H[r][0]  # slot 0, shape: [num_slices][num_ue_in_slice]
-        # generate_h_matrix trả về urllc trước, embb sau
-        H_urllc_r = H_r[:num_urllc]
-        H_embb_r  = H_r[num_urllc:num_urllc + num_embb]
-        # RU_Env cần embb trước, urllc sau (giống buildEnvAgent)
-        H_combined = list(H_embb_r) + list(H_urllc_r)
-        fixed_H.append([H_combined])
+    Tính H[r][slot=0][slice][ue] trực tiếp từ vị trí UE hiện tại của
+    `scenario` (sinh/cập nhật bởi scenario.py), thay cho generate_h_matrix
+    random trước đây.
 
-    frame_env.H = fixed_H
+    Lưu ý:
+    - Trong scenario.py, mọi RU được coi là đồng vị trí tại gốc tọa độ
+      (ru_pos = [0,0]), nên distance / path loss giống nhau cho mọi RU.
+      Tuy nhiên shadowing + fast fading được random ĐỘC LẬP cho từng RU
+      (mỗi RU là 1 chain anten riêng dù đồng vị trí vật lý).
+    - slice.ue_set chứa index UE TOÀN CỤC, khớp đúng thứ tự UE mà
+      generate_topology() sinh ra (UE được gán tuần tự theo từng RU sector).
+    - H trả về theo đúng format RU_Env cần: slice embb trước, urllc sau,
+      mỗi giá trị là channel gain dạng linear (không phải dB).
+    """
+    num_ues = scenario["ue_pos"].shape[0]
+
+    # Vị trí có thể đã đổi do update_position() -> phải tính lại distance/path loss
+    distance = np.linalg.norm(scenario["ue_pos"], axis=1)
+    scenario["distance"] = distance
+    path_loss_db = calculate_3gpp_pathloss(distance, fc_ghz)
+
+    H = []
+    for _ in range(len(RUs)):
+        gain_info = calculate_total_channel_gain(
+            num_ues, path_loss_db,
+            antenna_gain_dbi=antenna_gain_dbi,
+            shadow_std_db=shadow_std_db,
+        )
+        gain_linear = gain_info["gain_linear"]
+
+        # RU_Env cần thứ tự: embb trước, urllc sau (giống buildEnvAgent)
+        H_r_slot0 = []
+        for s in embb_slices:
+            H_r_slot0.append([gain_linear[ue_idx] for ue_idx in range(len(s.ue_set))])
+        for s in urllc_slices:
+            H_r_slot0.append([gain_linear[ue_idx] for ue_idx in range(len(s.ue_set))])
+
+        # Chỉ có 1 "slot" H dùng chung cho cả frame (giữ nguyên hành vi gốc)
+        H.append([H_r_slot0])
+
+    return H
+
+
+def _update_frame_env_H(frame_env, H):
+    """
+    Cập nhật H (đã đúng format RU_Env cần: embb trước, urllc sau) vào
+    FrameEnv và tất cả RU_Env bên trong.
+    """
+    frame_env.H = H
     for r, ru_env in enumerate(frame_env.RU_envs):
-        ru_env.update_H(fixed_H[r][0])
+        ru_env.update_H(H[r][0])
 
 
 def _calc_slice_budget(action, RUs, num_slices, total_prb_system):
@@ -345,118 +425,3 @@ def _plot_results(results_main, results_bm, figure_dir):
     plt.close()
     print(f"[PLOT] {figure_dir}/latency-bm.png")
 
-
-# ==============================================================================
-# MAIN — chạy trực tiếp: python3 evaluate_scenario.py
-# ==============================================================================
-
-if __name__ == "__main__":
-    import torch
-    import matplotlib
-    matplotlib.use("Agg")
-    import logging
-    logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
-    import matplotlib.pyplot as plt
-    plt.rcParams.update({"font.family": "sans-serif", "font.serif": []})
-
-    from input.takeInput import load_cons_from_json
-    from input.genInput import generate_pipeline_inputs, calculateScaleMax
-    from combine.general.train_general import buildEnvAgent
-    from combine.SAC.SACagent      import SACAgent      as SACAgent_main
-    from combine.SAC.FrameEnv      import FrameEnv      as FrameEnv_main
-    from combine.SAC_benchmark.SACagent import SACAgentBM as SACAgent_bm
-    from combine.SAC_benchmark.FrameEnv import FrameEnv as FrameEnv_bm
-
-    print("=== Evaluate Scenario ===\n")
-
-    # 1. Load config
-    consta    = load_cons_from_json("./config/cons.json")
-    trainCons = load_cons_from_json("./config/trainCons.json")
-
-    # 2. Tạo RUs, slices
-    RUs, embb_slices, urllc_slices, num_urllc_ue, num_embb_ue = generate_pipeline_inputs(
-        "./config/ru.yaml", "./config/slice.yaml", "./config/ue.yaml", consta
-    )
-    scale_max = calculateScaleMax(
-        RUs, embb_slices, urllc_slices,
-        consta["cost_switch"], consta["cost_gb"]
-    )
-
-    # 3. Sinh H ban đầu (sẽ được tái sinh mỗi frame bên trong evaluate_scenario)
-    H = generate_h_matrix(
-        len(RUs), consta["frame_slots"],
-        len(embb_slices) + len(urllc_slices),
-        num_urllc_ue, num_embb_ue
-    )
-
-    # 4. Tạo FrameEnv + agent cho framework (SAC chính)
-    ru_envs_main, _, frame_env_main_base, _ = buildEnvAgent(
-        RUs, urllc_slices, embb_slices, H,
-        consta["inter_RU"], consta["inter_factor"],
-        consta["N0_mW_per_MHz"], consta["w_reward"],
-        consta["cost_switch"], consta["cost_gb"],
-        scale_max, trainCons, consta["frame_slots"]
-    )
-    num_bwp_ru = [len(RUs[r].bwps) for r in range(len(RUs))]
-    frame_env_main = FrameEnv_main(
-        RUs, ru_envs_main, urllc_slices, embb_slices,
-        frame_env_main_base.H, consta["w_reward"], scale_max, consta["frame_slots"]
-    )
-    sac_agent = SACAgent_main(
-        5 + 4 * (len(urllc_slices) + len(embb_slices)),
-        len(RUs), num_bwp_ru,
-        len(urllc_slices) + len(embb_slices),
-        trainCons["forSAC"]
-    )
-    # Load model đã train cho framework
-    ck_main = torch.load("./sac_model.pth", map_location="cpu")
-
-    sac_agent.actor.load_state_dict(ck_main["actor"])
-    sac_agent.critic_1.load_state_dict(ck_main["critic_1"])
-    sac_agent.critic_2.load_state_dict(ck_main["critic_2"])
-    sac_agent.actor.eval()
-    print("[INFO] Đã load sac_model.pth cho framework")
-
-    # 5. Tạo FrameEnv + agent cho benchmark (SAC_benchmark)
-    ru_envs_bm, _, frame_env_bm_base, _ = buildEnvAgent(
-        RUs, urllc_slices, embb_slices, H,
-        consta["inter_RU"], consta["inter_factor"],
-        consta["N0_mW_per_MHz"], consta["w_reward"],
-        consta["cost_switch"], consta["cost_gb"],
-        scale_max, trainCons, consta["frame_slots"]
-    )
-    frame_env_bm = FrameEnv_bm(
-        RUs, ru_envs_bm, urllc_slices, embb_slices,
-        frame_env_bm_base.H, consta["w_reward"], scale_max, consta["frame_slots"]
-    )
-    sac_agent2 = SACAgent_bm(
-        4 + len(urllc_slices) + len(embb_slices),
-        len(RUs), num_bwp_ru,
-        len(urllc_slices) + len(embb_slices),
-        trainCons["forSAC"]
-    )
-    # Load model đã train cho benchmark (dùng chung file nếu chưa có file riêng)
-    ck_bm = torch.load("./sac_model_benchmark.pth", map_location="cpu")
-    
-    sac_agent2.actor.load_state_dict(ck_bm["actor"])
-    sac_agent2.critic_1.load_state_dict(ck_bm["critic_1"])
-    sac_agent2.critic_2.load_state_dict(ck_bm["critic_2"])
-    sac_agent2.actor.eval()
-    print("[INFO] Đã load sac_model_benchmark.pth cho benchmark")
-
-    # 6. Chạy đánh giá
-    results_main, results_bm = evaluate_scenario(
-        RUs, embb_slices, urllc_slices,
-        frame_env_main, frame_env_bm,
-        sac_agent, sac_agent2,
-        num_frames=50,
-        consta=consta,
-        plot=True,
-        figure_dir="./Figures/evaluate"
-    )
-
-    print(f"\n=== Hoàn thành! ===")
-    print(f"  Throughput trung bình : {np.mean(results_main['throughput']):.4f}")
-    print(f"  Latency (số mẫu)      : {len(results_main['latency'])}")
-    print(f"  Latency trung bình    : {np.mean(results_main['latency']):.6f}")
-    print(f"  Plots: ./Figures/evaluate/")
