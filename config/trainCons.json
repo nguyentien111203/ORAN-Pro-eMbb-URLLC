@@ -16,7 +16,7 @@
         "action_bias": 0.0,
         "device": "cpu",                 
         "gamma": 0.99,
-        "sac_train_episodes": 300,
+        "sac_train_episodes": 10000,
         "lr": 3e-4,
         "tau": 0.005,
         "alpha": 0.2,
