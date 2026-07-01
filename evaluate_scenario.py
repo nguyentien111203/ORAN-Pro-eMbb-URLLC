@@ -393,76 +393,99 @@ def _run_frame(frame_env, sac_action, frame_slots, num_embb, num_urllc, results)
 
 def _plot_results(results_main, results_bm, figure_dir):
     """
-    Vẽ biểu đồ đường cho các KPI (trừ latency dùng CDF).
-    Mỗi KPI tạo 2 file riêng: <key>.png (framework) và <key>-bm.png (benchmark).
+    Vẽ các KPI trên cùng một biểu đồ:
+        - Framework (SAC+DQN): màu xanh
+        - Benchmark: màu đỏ
+    Latency được biểu diễn bằng CDF.
     """
+
     line_metrics = [
-        ("throughput",          "Throughput (bps)",    "Throughput theo slot"),
-        ("resource_efficiency", "Resource Efficiency", "Resource Efficiency theo frame"),
-        ("energy_cost",         "Energy Cost",         "Energy Cost theo slot"),
-        ("fragment_cost",       "Fragment Cost",        "Fragment Cost theo slot"),
-        ("switch_cost",         "Switch Cost",          "Switch Cost theo slot"),
-        ("guardband_cost",      "Guardband Cost",       "Guardband Cost theo slot"),
-        ("slice_budget",        "Slice Budget Ratio",   "Slice Budget theo frame"),
+        ("throughput",          "Throughput (bps)",    "Throughput"),
+        ("resource_efficiency", "Resource Efficiency", "Resource Efficiency"),
+        ("energy_cost",         "Energy Cost",         "Energy Cost"),
+        ("fragment_cost",       "Fragment Cost",       "Fragment Cost"),
+        ("switch_cost",         "Switch Cost",         "Switch Cost"),
+        ("guardband_cost",      "Guardband Cost",      "Guardband Cost"),
+        ("slice_budget",        "Slice Budget Ratio",  "Slice Budget"),
     ]
 
     xlabel = {
         "resource_efficiency": "Frame",
-        "slice_budget":        "Frame",
+        "slice_budget": "Frame",
     }
 
+    # ======================================================
+    # Line plots
+    # ======================================================
     for key, ylabel, title in line_metrics:
-        x_label = xlabel.get(key, "Slot")
 
-        # --- Framework ---
         plt.figure(figsize=(10, 4))
-        plt.plot(results_main[key], color="steelblue", linewidth=1.5)
-        plt.xlabel(x_label)
+
+        plt.plot(
+            results_main[key],
+            color="steelblue",
+            linewidth=1.8,
+            label="Framework"
+        )
+
+        plt.plot(
+            results_bm[key],
+            color="tomato",
+            linewidth=1.8,
+            label="Benchmark"
+        )
+
+        plt.xlabel(xlabel.get(key, "Slot"))
         plt.ylabel(ylabel)
-        plt.title(f"{title} — Framework")
+        plt.title(title)
+
         plt.grid(True, linestyle="--", alpha=0.5)
+        plt.legend()
         plt.tight_layout()
+
         plt.savefig(f"{figure_dir}/{key}.png", dpi=150)
         plt.close()
+
         print(f"[PLOT] {figure_dir}/{key}.png")
 
-        # --- Benchmark ---
-        plt.figure(figsize=(10, 4))
-        plt.plot(results_bm[key], color="tomato", linewidth=1.5)
-        plt.xlabel(x_label)
-        plt.ylabel(ylabel)
-        plt.title(f"{title} — Benchmark")
-        plt.grid(True, linestyle="--", alpha=0.5)
-        plt.tight_layout()
-        plt.savefig(f"{figure_dir}/{key}-bm.png", dpi=150)
-        plt.close()
-        print(f"[PLOT] {figure_dir}/{key}-bm.png")
+    # ======================================================
+    # Latency CDF
+    # ======================================================
 
-    # --- CDF Latency: Framework ---
-    plt.figure(figsize=(8, 5))
-    data = np.sort(results_main["latency"])
-    cdf  = np.arange(1, len(data) + 1) / len(data)
-    plt.plot(data, cdf, color="steelblue", linewidth=1.5)
+    plt.figure(figsize=(8,5))
+
+    data_main = np.sort(results_main["latency"])
+    cdf_main = np.arange(1, len(data_main)+1)/len(data_main)
+
+    data_bm = np.sort(results_bm["latency"])
+    cdf_bm = np.arange(1, len(data_bm)+1)/len(data_bm)
+
+    plt.plot(
+        data_main,
+        cdf_main,
+        color="steelblue",
+        linewidth=2,
+        label="Framework"
+    )
+
+    plt.plot(
+        data_bm,
+        cdf_bm,
+        color="tomato",
+        linewidth=2,
+        label="Benchmark"
+    )
+
     plt.xlabel("Latency (s)")
     plt.ylabel("CDF")
-    plt.title("CDF Latency URLLC — Framework")
+    plt.title("CDF of URLLC Latency")
+
     plt.grid(True, linestyle="--", alpha=0.5)
+    plt.legend()
+
     plt.tight_layout()
     plt.savefig(f"{figure_dir}/latency.png", dpi=150)
     plt.close()
-    print(f"[PLOT] {figure_dir}/latency.png")
 
-    # --- CDF Latency: Benchmark ---
-    plt.figure(figsize=(8, 5))
-    data = np.sort(results_bm["latency"])
-    cdf  = np.arange(1, len(data) + 1) / len(data)
-    plt.plot(data, cdf, color="tomato", linewidth=1.5)
-    plt.xlabel("Latency (s)")
-    plt.ylabel("CDF")
-    plt.title("CDF Latency URLLC — Benchmark")
-    plt.grid(True, linestyle="--", alpha=0.5)
-    plt.tight_layout()
-    plt.savefig(f"{figure_dir}/latency-bm.png", dpi=150)
-    plt.close()
-    print(f"[PLOT] {figure_dir}/latency-bm.png")
+    print(f"[PLOT] {figure_dir}/latency.png")
 
