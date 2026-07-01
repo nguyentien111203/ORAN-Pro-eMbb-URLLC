@@ -290,7 +290,7 @@ def _run_frame(frame_env, sac_action, frame_slots, num_embb, num_urllc, results)
     Chạy 1 frame theo từng slot, thu thập KPI vào results.
     Tái dụng logic step() của FrameEnv nhưng log chi tiết theo slot.
     """
-    # Parse SAC action thành quota cho từng RU
+    # Parse SAC action thành quota cho từng RU (cấu trúc [r][s][b])
     action = np.array(sac_action).flatten()
     idx = 0
     sac_quotas = []
@@ -305,41 +305,82 @@ def _run_frame(frame_env, sac_action, frame_slots, num_embb, num_urllc, results)
                 idx += 1
         sac_quotas.append(ru_quota)
 
+    # Tham số softening (giống train_dqn)
+    beta  = 1.5
+    alpha = 3
+
+    # Các hằng số QoS lấy từ RU_Env đầu tiên (dùng chung cho mọi RU)
+    env0 = frame_env.RU_envs[0]
+    pac = np.array([
+        ue.pac
+        for s in range(num_urllc)
+        for ue in env0.urllc_slices[s].ue_set
+    ], dtype=np.float64)
+
+    lat_target = np.array([
+        ue.lat
+        for s in range(num_urllc)
+        for ue in env0.urllc_slices[s].ue_set
+    ], dtype=np.float64)
+
+    thr_min = np.array([
+        ue.thr
+        for s in range(num_embb)
+        for ue in env0.embb_slices[s].ue_set
+    ], dtype=np.float64)
+
+    # State khởi tạo cho từng RU
+    states = [np.zeros(env0.state_dim, dtype=np.float32) for _ in range(len(frame_env.RU_envs))]
+
     # Lặp từng slot
     for slot_index in range(frame_slots):
-        slot_throughput  = 0.0
-        slot_latency     = []
-        slot_energy      = 0.0
-        slot_fragment    = 0.0
-        slot_switch      = 0.0
-        slot_guardband   = 0.0
+        slot_throughput = 0.0
+        slot_latency    = []
+        slot_energy     = 0.0
+        slot_fragment   = 0.0
+        slot_switch     = 0.0
+        slot_guardband  = 0.0
+
+        # Tổng hợp numBits và totalThr từ tất cả RU (giống train_dqn)
+        numBits  = np.array([1e-7 for s in range(num_urllc)
+                             for _ in env0.urllc_slices[s].ue_set], dtype=np.float64)
+        totalThr = np.zeros_like(thr_min, dtype=np.float64)
 
         for r, env in enumerate(frame_env.RU_envs):
             env.update_H(frame_env.H[r][0])
+            dqn_action      = env.select_action(states[r], sac_quotas[r])
+            ruBits, ruThr   = env.computeOutput(dqn_action)
+            numBits  += ruBits
+            totalThr += ruThr
 
-            dqn_action             = env.select_action(env.state, sac_quotas[r])
-            eMBB_Thr, numBit_urllc = env.computeOutput(dqn_action)
-            _, _, _, info          = env.step(eMBB_Thr, numBit_urllc)
+        # Tính rate và softening (giống train_dqn)
+        urllc_lat  = pac / (numBits + 1e-8)
+        urllc_rate = urllc_lat / (lat_target + 1e-8)
+        embb_rate  = totalThr / (thr_min + 1e-8)
 
-            # --- Throughput: tổng throughput eMBB tại slot này (tất cả RU) ---
-            for s in range(num_embb):
-                for e in range(len(frame_env.embb_slices[s].ue_set)):
-                    slot_throughput += info["thr"][s][e]
+        lat_soft = [1 / (1 + alpha * max(urllc_rate[u] - 1, 0)) for u in range(len(urllc_rate))]
+        thr_soft = [float(np.tanh(beta * embb_rate[u])) for u in range(len(embb_rate))]
 
-            # --- Latency: latency URLLC tại slot này (tất cả RU, tất cả UE) ---
-            for s in range(num_urllc):
-                for u in range(len(frame_env.urllc_slices[s].ue_set)):
-                    slot_latency.append(info["lat"][s][u])
+        # Gọi step đúng 4 tham số, thu thập info từ từng RU
+        for r, env in enumerate(frame_env.RU_envs):
+            next_state, _, _, info = env.step(urllc_rate, embb_rate, lat_soft, thr_soft)
+            states[r] = next_state
 
-            # --- Cost: cộng đúng 1 lần mỗi RU/slot (không lặp theo UE) ---
+            # --- Cost: cộng đúng 1 lần mỗi RU/slot ---
             slot_energy    += info["costE"]
             slot_fragment  += info["costF"]
             slot_switch    += info["costS"]
             slot_guardband += info["costGB"]
 
+        # --- Throughput: tổng eMBB throughput toàn slot ---
+        slot_throughput = float(np.sum(totalThr))
+
+        # --- Latency: latency thô URLLC (giây) cho từng UE ---
+        slot_latency = urllc_lat.tolist()
+
         # Ghi nhận KPI của slot này
         results["throughput"].append(slot_throughput)
-        results["latency"].extend(slot_latency)  # add hết các thành phần, không trung bình
+        results["latency"].extend(slot_latency)
         results["energy_cost"].append(slot_energy)
         results["fragment_cost"].append(slot_fragment)
         results["switch_cost"].append(slot_switch)

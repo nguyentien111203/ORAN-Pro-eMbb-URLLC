@@ -8,7 +8,7 @@
         "eps_start": 1.0,  
         "eps_end": 0.05,     
         "eps_decay": 0.997,
-        "dqn_train_episodes": 50
+        "dqn_train_episodes": 500
     },
     "forSAC": {
             "comment": "Chỉnh gamma, train_episodes, lr, tau, ..._lr, không chỉnh action_...",
@@ -16,7 +16,7 @@
         "action_bias": 0.0,
         "device": "cpu",                 
         "gamma": 0.99,
-        "sac_train_episodes": 50,
+        "sac_train_episodes": 300,
         "lr": 3e-4,
         "tau": 0.005,
         "alpha": 0.2,
