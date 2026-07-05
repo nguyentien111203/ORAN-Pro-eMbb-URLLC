@@ -74,41 +74,44 @@ class SACAgentBM:
         self.alpha_opt = optim.Adam([self.log_alpha], lr=self.alpha_lr)
 
     def select_action(self, state):
-        # 1. Chuẩn bị state
-        state = torch.as_tensor(state, dtype=torch.float32, device=self.device)
 
-        # 2. Forward qua Actor
+        state = torch.as_tensor(
+            state,
+            dtype=torch.float32,
+            device=self.device
+        )
+
         with torch.no_grad():
             action_sample, _, _ = self.actor.sample(state)
-            raw_action = (action_sample + 1) / 2
-            raw_action = raw_action * self.action_scale + self.action_bias
 
-        # 3. Reshape về cấu hình [R, B, S]
-        action = raw_action.reshape((self.num_rus, max(self.num_bwp_ru), self.num_slices))
+        # [-1,1] -> [0,1]
+        raw_action = (action_sample + 1.0) / 2.0
 
-        # 4. Softmax per BWP (tổng tỷ lệ mỗi BWP = 1)
-        for r in range(action.shape[0]):
-            for b in range(action.shape[1]):
-                action[r, b] = torch.softmax(action[r, b].clone(), dim=0)
+        action = raw_action.reshape(
+            self.num_rus,
+            max(self.num_bwp_ru),
+            self.num_slices
+        )
 
-        # 4b. Enforce: mỗi slice chỉ nhận PRB từ 1 BWP duy nhất
-        # Với mỗi slice, chỉ giữ lại BWP có giá trị lớn nhất, set các BWP còn lại về 0
-        for r in range(action.shape[0]):
-            for s in range(action.shape[2]):
-                bwp_vals = action[r, :, s]                          # giá trị slice s trên từng BWP
-                best_bwp = int(torch.argmax(bwp_vals).item())       # BWP có tỷ lệ cao nhất
-                for b in range(action.shape[1]):
-                    if b != best_bwp:
-                        action[r, b, s] = 0.0                       # set BWP còn lại về 0
+        # Mỗi slice chỉ chọn một BWP
+        for r in range(self.num_rus):
+            for s in range(self.num_slices):
 
-        # 4c. Clamp: sau khi zero out, đảm bảo tổng PRB mỗi BWP <= 1
-        for r in range(action.shape[0]):
-            for b in range(action.shape[1]):
-                total = action[r, b, :].sum()
-                if total > 1.0:
-                    action[r, b] = action[r, b] / total
+                best_bwp = torch.argmax(action[r, :, s]).item()
 
-            last_tensor = last_tensor.view(action.shape)
+                keep = action[r, best_bwp, s].clone()
+
+                action[r, :, s] = 0.0
+                action[r, best_bwp, s] = keep
+
+        # Chuẩn hóa để dùng hết PRB của từng BWP
+        for r in range(self.num_rus):
+            for b in range(self.num_bwp_ru[r]):
+
+                total = action[r, b].sum()
+
+                if total > 1e-8:
+                    action[r, b] /= total
 
         return action.detach().cpu().numpy()
 

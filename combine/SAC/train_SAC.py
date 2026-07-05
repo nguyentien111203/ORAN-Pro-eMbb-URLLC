@@ -4,7 +4,7 @@ from tqdm import trange
 from collections import deque
 
 
-def train_sac(env, agent, num_episodes=300, log_interval=5, update_per_step=1, batch_size=128):
+def train_sac(env, agent, num_episodes=300, log_interval=1, update_per_step=1, batch_size=128):
     """
     Huấn luyện Soft Actor-Critic cho bài toán phân bổ công suất (Frame-level).
     env : Môi trường chung trong 1 frame
@@ -85,10 +85,10 @@ def train_sac(env, agent, num_episodes=300, log_interval=5, update_per_step=1, b
         else:
             avg_actor_loss = 0.0
             avg_critic_loss = 0.0
-        if ep % 100 == 0:
-            print(env.avg_rate, '\n')
-            print(env.avg_lat, '\n')
-            print(env.vio_lat, '\n')
+        #if ep % 100 == 0:
+        #    print(env.avg_rate, '\n')
+        #    print(env.avg_lat, '\n')
+        #    print(env.vio_lat, '\n')
 
         rewards_history.append(total_reward)
         actor_losses.append(avg_actor_loss)
@@ -106,7 +106,7 @@ def train_sac(env, agent, num_episodes=300, log_interval=5, update_per_step=1, b
         avg_rewards.append(moving_avg_reward)
 
     # Vẽ hình các thứ
-    env.drawChart()
+    #env.drawChart()
 
     # Sau khi train xong
     sac_model_path = f"./combine/SAC/model/sac_model_{env.num_rus}_{env.num_slices}_{env.num_urllc}.pth"

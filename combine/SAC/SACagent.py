@@ -76,48 +76,37 @@ class SACAgent:
 
     def select_action(self, state):
 
-        num_ru = self.num_rus
-        num_slices = self.num_slices
-
-
-        state_t = torch.as_tensor(
+        state = torch.as_tensor(
             state,
             dtype=torch.float32,
             device=self.device
         ).unsqueeze(0)
 
         with torch.no_grad():
-            action, _, _ = self.actor.sample(state_t)
+            action_sample, _, _ = self.actor.sample(state)
 
-        action = action.squeeze(0).cpu().numpy()
+        # [1, action_dim]
+        action = torch.sigmoid(action_sample)
 
-        BWP_slice = [
-            [
-                [0.0 for _ in range(self.num_slices)]
-                for _ in range(self.num_bwp_ru[r])
-            ]
-            for r in range(num_ru)
-        ]
-        idx = 0
+        action = action.view(
+            self.num_rus,
+            max(self.num_bwp_ru),
+            self.num_slices
+        )
 
-        for r in range(num_ru):
+        for r in range(self.num_rus):
             for b in range(self.num_bwp_ru[r]):
-                # lấy action của slice trên RU-BWP này
-                raw = action[
-                    idx:
-                    idx + num_slices
-                ]
-                idx += num_slices
-                # tránh âm do tanh / Gaussian policy
-                raw = np.maximum(raw, 0)
-                total = np.sum(raw)
-                # chuẩn hóa nếu vượt budget
-                if total > 1.0:
-                    raw = raw / total
-                for s in range(num_slices):
-                    BWP_slice[r][b][s] = raw[s]
 
-        return BWP_slice
+                # bỏ các allocation quá nhỏ
+                action[r, b][action[r, b] < 0.05] = 0.0
+
+                total = action[r, b].sum()
+
+                # chỉ scale khi vượt budget
+                if total > 1.0:
+                    action[r, b] = action[r, b] / total
+
+        return action.squeeze(0).cpu().numpy()
 
     def update(self, step, policy_delay, last_actor_loss, batch_size, debug=False):
         """

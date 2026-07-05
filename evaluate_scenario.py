@@ -45,7 +45,6 @@ def evaluate_scenario(
     consta,             # Dict hằng số hệ thống (chứa frame_slots, ...)
     plot=True,
     figure_dir="./Figures/evaluate",
-    scenario_type="stable",   # "stable" | "low" | "high" (xem mobility trong scenario.py)
     scenario_seed=None,       # seed cho lần khởi tạo vị trí UE đầu tiên
     scenario_config=None,     # config tuỳ chỉnh cho scenario.py; None -> load_and_merge_config
     dt=None,                  # khoảng thời gian giữa 2 frame (s), dùng để update_position
@@ -115,77 +114,93 @@ def evaluate_scenario(
             f"Tổng số UE ({num_ues_total}) phải chia hết cho số RU ({len(RUs)}) "
             "để generate_topology() trong scenario.py phân bố đều UE theo sector."
         )
+    SCENARIO = ["low", "stable", "high"]   # "stable" | "low" | "high" (xem mobility trong scenario.py)
+    for scenario_type in SCENARIO: 
 
-    mobility_scenario = generate_scenario(scenario_type, seed=scenario_seed, config=scn_config)
+        mobility_scenario = generate_scenario(scenario_type, seed=scenario_seed, config=scn_config)
 
-    # dt mặc định: thời lượng 1 frame (frame_slots * slot_duration), nếu không
-    # truyền vào trực tiếp hoặc khai báo trong consta.
-    frame_dt = dt if dt is not None else consta.get(
-        "frame_duration_s", frame_slots * consta.get("slot_duration_s", 1e-3)
-    )
-
-    for frame_idx in range(num_frames):
-
-        # ------------------------------------------------------------------
-        # Bước 1: Cập nhật vị trí UE theo mobility (frame đầu dùng vị trí khởi
-        # tạo, từ frame thứ 2 trở đi UE di chuyển theo velocity/bounds).
-        # ------------------------------------------------------------------
-        if frame_idx > 0:
-            mobility_scenario = update_position(mobility_scenario, frame_dt)
-
-        H = _build_h_from_scenario(
-            mobility_scenario, RUs, embb_slices, urllc_slices,
-            fc_ghz=scn_config["channel"]["fc_ghz"],
-            antenna_gain_dbi=scn_config["channel"]["antenna_gain_dbi"],
-            shadow_std_db=scn_config["channel"]["shadow_std_db"],
+        # dt mặc định: thời lượng 1 frame (frame_slots * slot_duration), nếu không
+        # truyền vào trực tiếp hoặc khai báo trong consta.
+        frame_dt = dt if dt is not None else consta.get(
+            "frame_duration_s", frame_slots * consta.get("slot_duration_s", 1e-3)
         )
-
-        # Cập nhật H vào cả 2 FrameEnv (cùng kịch bản di động -> so sánh công bằng)
-        _update_frame_env_H(frame_env_main, H)
-        _update_frame_env_H(frame_env_bm,   H)
-
-        # ------------------------------------------------------------------
-        # Bước 2: Reset môi trường, lấy state ban đầu cho SAC
-        # FrameEnv.reset() mới không return state, nên tự tạo vector 0
-        # ------------------------------------------------------------------
-        frame_env_main.reset()
-        frame_env_bm.reset()
+        # State khởi đầu
         state_main = np.zeros(frame_env_main.state_dim, dtype=np.float32)
         state_bm   = np.zeros(frame_env_bm.state_dim, dtype=np.float32)
 
-        # ------------------------------------------------------------------
-        # Bước 3: SAC sinh action (budget) cho cả frame
-        # framework (SACAgent mới) không còn dùng last_action,
-        # benchmark (SACAgentBM) vẫn cần last_action cho action smoothing
-        # ------------------------------------------------------------------
-        action_main = sac_agent.select_action(state_main)
-        action_bm   = sac_agent2.select_action(state_bm)
+        for frame_idx in range(num_frames):
 
-        # Tính slice_budget từ quota SAC
-        budget_main = _calc_slice_budget(action_main, RUs, num_embb + num_urllc, total_prb_system)
-        budget_bm   = _calc_slice_budget(action_bm,   RUs, num_embb + num_urllc, total_prb_system)
+            # ------------------------------------------------------------------
+            # Bước 1: Cập nhật vị trí UE theo mobility (frame đầu dùng vị trí khởi
+            # tạo, từ frame thứ 2 trở đi UE di chuyển theo velocity/bounds).
+            # ------------------------------------------------------------------
+            if frame_idx > 0:
+                mobility_scenario = update_position(mobility_scenario, frame_dt)
 
-        results_main["slice_budget"].append(budget_main)
-        results_bm["slice_budget"].append(budget_bm)
+            H = _build_h_from_scenario(
+                mobility_scenario, RUs, embb_slices, urllc_slices,
+                fc_ghz=scn_config["channel"]["fc_ghz"],
+                antenna_gain_dbi=scn_config["channel"]["antenna_gain_dbi"],
+                shadow_std_db=scn_config["channel"]["shadow_std_db"],
+            )
 
-        # resource_efficiency = slice_budget (quota SAC / total PRB)
-        results_main["resource_efficiency"].append(budget_main)
-        results_bm["resource_efficiency"].append(budget_bm)
+            # Cập nhật H vào cả 2 FrameEnv (cùng kịch bản di động -> so sánh công bằng)
+            _update_frame_env_H(frame_env_main, H)
+            _update_frame_env_H(frame_env_bm,   H)
 
+            # ------------------------------------------------------------------
+            # Bước 2: Reset môi trường, lấy state ban đầu cho SAC
+            # FrameEnv.reset() mới không return state, nên tự tạo vector 0
+            # ------------------------------------------------------------------
+            frame_env_main.reset()
+            frame_env_bm.reset()
+            # ------------------------------------------------------------------
+            # Bước 3: SAC sinh action (budget) cho cả frame
+            # framework (SACAgent mới) không còn dùng last_action,
+            # benchmark (SACAgentBM) vẫn cần last_action cho action smoothing
+            # ------------------------------------------------------------------
+            action_main = sac_agent.select_action(state_main)
+            action_bm   = sac_agent2.select_action(state_bm)
 
-        # ------------------------------------------------------------------
-        # Bước 4: Chạy từng slot trong frame, thu thập KPI
-        # ------------------------------------------------------------------
-        _run_frame(
-            frame_env_main, action_main,
-            frame_slots, num_embb, num_urllc,
-            results_main
-        )
-        _run_frame(
-            frame_env_bm, action_bm,
-            frame_slots, num_embb, num_urllc,
-            results_bm
-        )
+            # Tính slice_budget từ quota SAC
+            budget_main = _calc_slice_budget(action_main, RUs, num_embb + num_urllc, total_prb_system)
+            budget_bm   = _calc_slice_budget(action_bm,   RUs, num_embb + num_urllc, total_prb_system)
+
+            results_main["slice_budget"].append(budget_main)
+            results_bm["slice_budget"].append(budget_bm)
+
+            # ------------------------------------------------------------------
+            # Bước 4: Chạy từng slot trong frame, thu thập KPI
+            # ------------------------------------------------------------------
+
+            state_main, _, info_main, _ = frame_env_main.step(action_main)
+            state_bm, _, info_bm, _ = frame_env_bm.step(action_bm)
+
+            results_main['throughput'].append(info_main["thr"])
+            results_bm['throughput'].append(info_bm["thr"])
+
+            #print(info_main["thr"], '\n')
+            #print(info_bm["thr"], '\n')
+
+            results_main['latency'].extend(info_main["lat"])
+            results_bm['latency'].extend(info_bm["lat"])
+
+            results_main["energy_cost"].append(info_main["costE"])
+            results_bm["energy_cost"].append(info_bm["costE"])
+
+            results_main["fragment_cost"].append(info_main["costF"])
+            results_bm["fragment_cost"].append(info_bm["costF"])
+
+            results_main["switch_cost"].append(info_main["costS"])
+            results_bm["switch_cost"].append(info_bm["costS"])
+
+            results_main["guardband_cost"].append(info_main["costGB"])
+            results_bm["guardband_cost"].append(info_bm["costGB"])
+
+            results_main["resource_efficiency"].append(info_main["resource_eff"])
+            results_bm["resource_efficiency"].append(info_bm["resource_eff"])
+
+            frame_dt += 1
 
     # ------------------------------------------------------------------
     # Bước 5 (tuỳ chọn): Vẽ biểu đồ
@@ -284,109 +299,6 @@ def _calc_slice_budget(action, RUs, num_slices, total_prb_system):
                 idx += 1
     return total_quota / (total_prb_system + 1e-9)
 
-
-def _run_frame(frame_env, sac_action, frame_slots, num_embb, num_urllc, results):
-    """
-    Chạy 1 frame theo từng slot, thu thập KPI vào results.
-    Tái dụng logic step() của FrameEnv nhưng log chi tiết theo slot.
-    """
-    # Parse SAC action thành quota cho từng RU (cấu trúc [r][s][b])
-    action = np.array(sac_action).flatten()
-    idx = 0
-    sac_quotas = []
-    for r in range(len(frame_env.RUs)):
-        num_bwps = len(frame_env.RUs[r].bwps)
-        num_slices = frame_env.num_slices
-        ru_quota = [[0 for _ in range(num_bwps)] for _ in range(num_slices)]
-        for s in range(num_slices):
-            for b in range(num_bwps):
-                total_prbs = frame_env.RUs[r].bwps[b].num_prb
-                ru_quota[s][b] = int(action[idx] * total_prbs)
-                idx += 1
-        sac_quotas.append(ru_quota)
-
-    # Tham số softening (giống train_dqn)
-    beta  = 1.5
-    alpha = 3
-
-    # Các hằng số QoS lấy từ RU_Env đầu tiên (dùng chung cho mọi RU)
-    env0 = frame_env.RU_envs[0]
-    pac = np.array([
-        ue.pac
-        for s in range(num_urllc)
-        for ue in env0.urllc_slices[s].ue_set
-    ], dtype=np.float64)
-
-    lat_target = np.array([
-        ue.lat
-        for s in range(num_urllc)
-        for ue in env0.urllc_slices[s].ue_set
-    ], dtype=np.float64)
-
-    thr_min = np.array([
-        ue.thr
-        for s in range(num_embb)
-        for ue in env0.embb_slices[s].ue_set
-    ], dtype=np.float64)
-
-    # State khởi tạo cho từng RU
-    states = [np.zeros(env0.state_dim, dtype=np.float32) for _ in range(len(frame_env.RU_envs))]
-
-    # Lặp từng slot
-    for slot_index in range(frame_slots):
-        slot_throughput = 0.0
-        slot_latency    = []
-        slot_energy     = 0.0
-        slot_fragment   = 0.0
-        slot_switch     = 0.0
-        slot_guardband  = 0.0
-
-        # Tổng hợp numBits và totalThr từ tất cả RU (giống train_dqn)
-        numBits  = np.array([1e-7 for s in range(num_urllc)
-                             for _ in env0.urllc_slices[s].ue_set], dtype=np.float64)
-        totalThr = np.zeros_like(thr_min, dtype=np.float64)
-
-        for r, env in enumerate(frame_env.RU_envs):
-            env.update_H(frame_env.H[r][0])
-            dqn_action      = env.select_action(states[r], sac_quotas[r])
-            ruBits, ruThr   = env.computeOutput(dqn_action)
-            numBits  += ruBits
-            totalThr += ruThr
-
-        # Tính rate và softening (giống train_dqn)
-        urllc_lat  = pac / (numBits + 1e-8)
-        urllc_rate = urllc_lat / (lat_target + 1e-8)
-        embb_rate  = totalThr / (thr_min + 1e-8)
-
-        lat_soft = [1 / (1 + alpha * max(urllc_rate[u] - 1, 0)) for u in range(len(urllc_rate))]
-        thr_soft = [float(np.tanh(beta * embb_rate[u])) for u in range(len(embb_rate))]
-
-        # Gọi step đúng 4 tham số, thu thập info từ từng RU
-        for r, env in enumerate(frame_env.RU_envs):
-            next_state, _, _, info = env.step(urllc_rate, embb_rate, lat_soft, thr_soft)
-            states[r] = next_state
-
-            # --- Cost: cộng đúng 1 lần mỗi RU/slot ---
-            slot_energy    += info["costE"]
-            slot_fragment  += info["costF"]
-            slot_switch    += info["costS"]
-            slot_guardband += info["costGB"]
-
-        # --- Throughput: tổng eMBB throughput toàn slot ---
-        slot_throughput = float(np.sum(totalThr))
-
-        # --- Latency: latency thô URLLC (giây) cho từng UE ---
-        slot_latency = urllc_lat.tolist()
-
-        # Ghi nhận KPI của slot này
-        results["throughput"].append(slot_throughput)
-        results["latency"].extend(slot_latency)
-        results["energy_cost"].append(slot_energy)
-        results["fragment_cost"].append(slot_fragment)
-        results["switch_cost"].append(slot_switch)
-        results["guardband_cost"].append(slot_guardband)
-
-
 # ==============================================================================
 # VẼ BIỂU ĐỒ
 # ==============================================================================
@@ -449,43 +361,65 @@ def _plot_results(results_main, results_bm, figure_dir):
         print(f"[PLOT] {figure_dir}/{key}.png")
 
     # ======================================================
-    # Latency CDF
+    # Transmission Delay CDF
     # ======================================================
 
-    plt.figure(figsize=(8,5))
+    plt.figure(figsize=(8, 5))
 
-    data_main = np.sort(results_main["latency"])
-    cdf_main = np.arange(1, len(data_main)+1)/len(data_main)
+    # Sort data
+    data_main = np.sort(np.asarray(results_main["latency"]))
+    data_bm   = np.sort(np.asarray(results_bm["latency"]))
 
-    data_bm = np.sort(results_bm["latency"])
-    cdf_bm = np.arange(1, len(data_bm)+1)/len(data_bm)
+    # ECDF
+    cdf_main = np.arange(1, len(data_main) + 1) / len(data_main)
+    cdf_bm   = np.arange(1, len(data_bm) + 1) / len(data_bm)
 
-    plt.plot(
+    # Nếu muốn bỏ 0 vì log scale không vẽ được
+    eps = 1e-12
+    data_main = np.maximum(data_main, eps)
+    data_bm   = np.maximum(data_bm, eps)
+
+    # CDF
+    plt.step(
         data_main,
         cdf_main,
+        where="post",
         color="steelblue",
         linewidth=2,
         label="Framework"
     )
 
-    plt.plot(
+    plt.step(
         data_bm,
         cdf_bm,
+        where="post",
         color="tomato",
         linewidth=2,
+        linestyle="--",
         label="Benchmark"
     )
 
-    plt.xlabel("Latency (s)")
-    plt.ylabel("CDF")
-    plt.title("CDF of URLLC Latency")
+    # Nếu delay trải dài nhiều bậc thì bật log scale
+    plt.xscale("log")
 
-    plt.grid(True, linestyle="--", alpha=0.5)
+    # Hoặc nếu không muốn log thì comment dòng trên
+    # và dùng đoạn dưới để cắt outlier:
+    #
+    # xmax = np.percentile(
+    #     np.concatenate([data_main, data_bm]),
+    #     99.5
+    # )
+    # plt.xlim(0, xmax)
+
+    plt.xlabel("Transmission Delay (s)")
+    plt.ylabel("Empirical CDF")
+    plt.title("CDF of URLLC Transmission Delay")
+
+    plt.grid(True, which="both", linestyle="--", alpha=0.5)
     plt.legend()
 
     plt.tight_layout()
-    plt.savefig(f"{figure_dir}/latency.png", dpi=150)
+    plt.savefig(f"{figure_dir}/latency.png", dpi=300)
     plt.close()
 
     print(f"[PLOT] {figure_dir}/latency.png")
-

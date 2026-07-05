@@ -9,7 +9,7 @@ plt.rcParams.update({"font.family": "sans-serif", "font.serif": []})
 
 from input.takeInput import load_cons_from_json
 from input.genInput import generate_pipeline_inputs, calculateScaleMax
-from combine.general.train_general import buildEnvAgent
+from combine.train import buildEnvAgent, alternating_training
 from combine.SAC.SACagent      import SACAgent      as SACAgent_main
 from combine.SAC.FrameEnv      import FrameEnv      as FrameEnv_main
 from combine.SAC_benchmark.SACagent import SACAgentBM as SACAgent_bm
@@ -82,23 +82,12 @@ def main():
         RUs, embb_slices, urllc_slices,
         frame_env_main_base, frame_env_bm_base,
         sac_agent_main, sac_agentbm,
-        num_frames=50,
+        num_frames=100,
         consta=consta,
         plot=True,
         figure_dir="./Figures/evaluate",
-        scenario_type="high",
         scenario_seed=None,
         scenario_config=init_scn_config,
     )
-
-    print(f"\n=== Hoàn thành! ===")
-    print(f"  Throughput trung bình : {np.mean(results_main['throughput']):.4f}")
-    print(f"  Latency (số mẫu)      : {len(results_main['latency'])}")
-    print(f"  Latency p90    : {np.percentile(results_main['latency'], 90):.6f}")
-    print(f"  Throughput trung bình bm : {np.mean(results_bm['throughput']):.4f}")
-    print(f"  Latency (số mẫu) bm     : {len(results_bm['latency'])}")
-    print(f"  Latency p90 bm   : {np.percentile(results_bm['latency'], 90):.6f}")
-    print(f"  Plots: ./Figures/evaluate/")
-
 
 main()

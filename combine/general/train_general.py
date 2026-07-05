@@ -5,6 +5,8 @@ from tqdm import trange, tqdm
 from combine.common.multiagent_DQN import MultiHeadDQNAgent
 from combine.SAC.SACagent import SACAgent
 from combine.SAC.FrameEnv import FrameEnv
+from combine.SAC_benchmark.SACagent import SACAgentBM
+from combine.SAC_benchmark.train_SAC import train_sacBM
 from combine.SAC.train_SAC import train_sac
 from combine.utils.pltSAC import plot_SACtraining_curves, plot_SACcriticlosstraining_curves, plot_SACactorlosstraining_curves
 from combine.utils.plotDQN import plot_DQNtraining_curves, plot_DQNlosstraining_curves
@@ -60,15 +62,21 @@ def buildEnvAgent(RUs, arg1_slices, arg2_slices, H, inter_RU, inter_factor, N0, 
     
     frame_env = FrameEnv(RUs, ru_envs, urllc_slices, embb_slices, fixed_H, w_reward, scale_max, frame_slots)
     
-    sac_agent = SACAgent(
-        5 + 4 * (len(urllc_slices) + len(embb_slices)), len(RUs), 
-        num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"]
-    )
+    if mode == "fm":
+        sac_agent = SACAgent(
+            5 + 4 * (len(urllc_slices) + len(embb_slices)), len(RUs), 
+            num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"]
+        )
+    else:
+        sac_agent = SACAgentBM(
+            5 + 4 * (len(urllc_slices) + len(embb_slices)), len(RUs), 
+            num_bwp_ru, len(urllc_slices) + len(embb_slices), train_cons["forSAC"]
+        )
 
     return ru_envs, ru_dqn_agents, frame_env, sac_agent
 
 
-def alternating_training(num_rus, ru_envs, ru_dqn_agents, frame_env, sac_agent, numepDQN, numepSAC):
+def alternating_training(num_rus, ru_envs, ru_dqn_agents, frame_env, sac_agent, numepDQN, numepSAC, mode):
     """
     Train DQN trước (slot-level, độc lập per-RU), sau đó train SAC (frame-level).
 

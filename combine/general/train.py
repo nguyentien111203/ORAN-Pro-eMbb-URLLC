@@ -80,10 +80,10 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
 
             # ================= STEP =================
             next_states = [None] * num_ru
-            rate_dict["avg_embb"].append(np.average(embb_rate))
-            rate_dict["avg_urllc"].append(np.average(urllc_rate))
-            rate_dict["min_embb"].append(np.min(embb_rate))
-            rate_dict["min_urllc"].append(np.min(urllc_rate))
+            #rate_dict["avg_embb"].append(np.average(embb_rate))
+            #rate_dict["avg_urllc"].append(np.average(urllc_rate))
+            #rate_dict["min_embb"].append(np.min(embb_rate))
+            #rate_dict["min_urllc"].append(np.min(urllc_rate))
 
             lat_soft = []
             thr_soft = []
@@ -142,13 +142,13 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
         for agent in agents:
             agent.eps = max(agent.eps_end, agent.eps - agent.eps_decay)
 
-    plot_rate(rate_dict, "URLLC", "min")
-    plot_rate(rate_dict, "URLLC", "avg")
-    plot_rate(rate_dict, "URLLC", "gap")
+    #plot_rate(rate_dict, "URLLC", "min")
+    #plot_rate(rate_dict, "URLLC", "avg")
+    #lot_rate(rate_dict, "URLLC", "gap")
 
-    plot_rate(rate_dict, "eMBB", "min")
-    plot_rate(rate_dict, "eMBB", "avg")
-    plot_rate(rate_dict, "eMBB", "gap")
+    #plot_rate(rate_dict, "eMBB", "min")
+    #plot_rate(rate_dict, "eMBB", "avg")
+    #plot_rate(rate_dict, "eMBB", "gap")
 
     return avg_rewards, avg_losses
 

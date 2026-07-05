@@ -157,7 +157,7 @@ def generate_scenario(scenario_type="stable", seed=None, config=None):
             
         elif scenario_type == "high":
             traffic_profiles[start_idx:end_idx] = "DL_Continuous"
-            speed[start_idx:end_idx] = np.random.uniform(mob_config['speed_min'], mob_config['speed_max'], ues_per_ru)
+            speed[start_idx:end_idx] = np.random.uniform(1.5 * mob_config['speed_min'], 1.5 * mob_config['speed_max'], ues_per_ru)
             angles_to_center = np.arctan2(ue_pos[start_idx:end_idx, 1], ue_pos[start_idx:end_idx, 0])
             direction[start_idx:end_idx] = angles_to_center + np.random.choice([0, np.pi], ues_per_ru)
 
