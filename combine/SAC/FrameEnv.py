@@ -74,6 +74,7 @@ class FrameEnv(gym.Env):
             for s in range(len(self.embb_slices)):
                 self.eMBB_frame[slot].append(np.zeros(len(self.embb_slices[s].ue_set), np.float64))
                 self.embb_frame_rate[slot].append(np.zeros(len(self.embb_slices[s].ue_set), np.float64))
+        self.numPRBeMBB = 0
 
         #self.avg_lat = 0
         #self.vio_lat = 0
@@ -114,6 +115,7 @@ class FrameEnv(gym.Env):
         self.URLLC_frame_avg =np.zeros(self.frame_slots)
         self.eMBB_frame_avg = np.zeros(self.frame_slots)
         self.URLLC_frame_flat = []
+        self.numPRBeMBB = 0
 
         self.slot_count = 0
 
@@ -297,7 +299,7 @@ class FrameEnv(gym.Env):
             "costF": np.average(self.costFrag),
             "costS": np.average(self.costSwit),
             "costGB": np.average(self.costGB),
-            "resource_eff": np.sum(embb_frame_sum) / (sum(v for r in budget_BWP_slice for b in r for v in b) + 1e-9)
+            "resource_eff": np.sum(embb_frame_sum) / (self.numPRBeMBB + 1e-9)
         }
 
         #self.avg_lat = np.average([v for s in self.URLLC_frame_avg for v in s])
@@ -425,6 +427,8 @@ class FrameEnv(gym.Env):
                         overflow -= take
 
                 ru_alloc.append(alloc.tolist())
+                for s in range(self.num_slices):
+                    self.numPRBeMBB += ru_alloc[b][s]
 
             budget_BWP_slice.append(ru_alloc)
 

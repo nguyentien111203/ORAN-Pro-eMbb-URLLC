@@ -6,7 +6,7 @@ rus:
         bandindex: 1  # numerology 0
         p_each_PRB: 50 # mW
       - id: bwp_2
-        num_prb: 48
+        num_prb: 32
         bandindex: 2  # numerology 0
         p_each_PRB: 50 # mW
   - Ru_index: ru_1
@@ -16,7 +16,7 @@ rus:
         bandindex: 1  # numerology 0
         p_each_PRB: 50 # mW
       - id: bwp_2
-        num_prb: 48
+        num_prb: 32
         bandindex: 2  # numerology 0
         p_each_PRB: 50 # mW
   - Ru_index: ru_2
@@ -26,6 +26,6 @@ rus:
         bandindex: 1  # numerology 0
         p_each_PRB: 50 # mW
       - id: bwp_2
-        num_prb: 48
+        num_prb: 32
         bandindex: 2  # numerology 0
         p_each_PRB: 50 # mW

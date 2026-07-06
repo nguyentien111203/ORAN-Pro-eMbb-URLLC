@@ -85,7 +85,6 @@ class SACAgent:
         with torch.no_grad():
             action_sample, _, _ = self.actor.sample(state)
 
-        # [1, action_dim]
         action = torch.sigmoid(action_sample)
 
         action = action.view(
@@ -97,14 +96,20 @@ class SACAgent:
         for r in range(self.num_rus):
             for b in range(self.num_bwp_ru[r]):
 
-                # bỏ các allocation quá nhỏ
-                action[r, b][action[r, b] < 0.05] = 0.0
+                # bỏ allocation rất nhỏ
+                action[r, b][action[r, b] < 0.02] = 0.0
 
                 total = action[r, b].sum()
 
-                # chỉ scale khi vượt budget
-                if total > 1.0:
-                    action[r, b] = action[r, b] / total
+                if total > 0:
+
+                    # Pattern
+                    pattern = action[r, b] / total
+
+                    # Budget sử dụng (0.3 ~ 1.0)
+                    usage = torch.clamp(total / self.num_slices, 0.7, 0.95)
+
+                    action[r, b] = pattern * usage
 
         return action.squeeze(0).cpu().numpy()
 
