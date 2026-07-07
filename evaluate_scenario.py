@@ -169,6 +169,10 @@ def evaluate_scenario(
             results_main["slice_budget"].append(budget_main)
             results_bm["slice_budget"].append(budget_bm)
 
+            # Tính entropy của action SAC theo công thức H = -sum(p * log2(p))
+            results_main["action_entropy"].append(_action_entropy(action_main))
+            results_bm["action_entropy"].append(_action_entropy(action_bm))
+
             # ------------------------------------------------------------------
             # Bước 4: Chạy từng slot trong frame, thu thập KPI
             # ------------------------------------------------------------------
@@ -225,6 +229,7 @@ def _empty_results():
         "switch_cost"        : [],
         "guardband_cost"     : [],
         "slice_budget"       : [],
+        "action_entropy"     : [],  # Entropy của action SAC mỗi frame
     }
 
 
@@ -319,6 +324,7 @@ def _plot_results(results_main, results_bm, figure_dir):
         ("switch_cost",         "Switch Cost",         "Switch Cost"),
         ("guardband_cost",      "Guardband Cost",      "Guardband Cost"),
         ("slice_budget",        "Slice Budget Ratio",  "Slice Budget"),
+        ("action_entropy",      "Action Entropy (bits)", "Action Entropy"),
     ]
 
     xlabel = {
@@ -423,3 +429,53 @@ def _plot_results(results_main, results_bm, figure_dir):
     plt.close()
 
     print(f"[PLOT] {figure_dir}/latency.png")
+
+
+# ==============================================================================
+# THỐNG KÊ THROUGHPUT (mean, std)
+# ==============================================================================
+
+def print_throughput_stats(results_main, results_bm):
+    """In mean và std của throughput cho cả 2 model."""
+    thr_main = np.array(results_main["throughput"])
+    thr_bm   = np.array(results_bm["throughput"])
+    print(f"\n=== Throughput Statistics ===")
+    print(f"  Framework  — mean: {np.mean(thr_main):.4f}, std: {np.std(thr_main):.4f}")
+    print(f"  Benchmark  — mean: {np.mean(thr_bm):.4f},  std: {np.std(thr_bm):.4f}")
+    print(f"\n=== Action Entropy Statistics ===")
+    ent_main = np.array(results_main["action_entropy"])
+    ent_bm   = np.array(results_bm["action_entropy"])
+    print(f"  Framework  — mean entropy: {np.mean(ent_main):.4f}, std: {np.std(ent_main):.4f}")
+    print(f"  Benchmark  — mean entropy: {np.mean(ent_bm):.4f},  std: {np.std(ent_bm):.4f}")
+
+
+# ==============================================================================
+# HÀM TÍNH ENTROPY
+# ==============================================================================
+
+def _entropy(p):
+    """
+    Tính entropy Shannon: H = -sum(p_i * log2(p_i))
+    p là mảng xác suất (phân bổ tài nguyên cho các slice trong 1 BWP).
+    """
+    p = np.asarray(p, dtype=np.float64)
+    p = p[p > 1e-12]  # bỏ số 0 để tránh log(0)
+    return -np.sum(p * np.log2(p))
+
+
+def _action_entropy(action):
+    """
+    Tính entropy trung bình của toàn action SAC.
+    action có shape (num_rus, num_bwps, num_slices) sau softmax —
+    mỗi [r, b, :] là phân phối xác suất phân bổ cho các slice trên BWP b của RU r.
+    Entropy được tính cho từng cặp (r, b) rồi lấy trung bình.
+    """
+    action = np.array(action)
+    if action.ndim == 1:
+        # Nếu chưa reshape, bỏ qua — không đủ thông tin shape
+        return 0.0
+    ent = []
+    for r in range(action.shape[0]):
+        for b in range(action.shape[1]):
+            ent.append(_entropy(action[r, b]))
+    return float(np.mean(ent))

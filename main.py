@@ -14,7 +14,7 @@ from combine.SAC.SACagent      import SACAgent      as SACAgent_main
 from combine.SAC.FrameEnv      import FrameEnv      as FrameEnv_main
 from combine.SAC_benchmark.SACagent import SACAgentBM as SACAgent_bm
 from combine.train import alternating_training
-from evaluate_scenario import load_and_merge_config, generate_scenario, _build_h_from_scenario, evaluate_scenario
+from evaluate_scenario import load_and_merge_config, generate_scenario, _build_h_from_scenario, evaluate_scenario, print_throughput_stats
 
 def main():
     print("=== Evaluate Scenario ===\n")
@@ -82,12 +82,14 @@ def main():
         RUs, embb_slices, urllc_slices,
         frame_env_main_base, frame_env_bm_base,
         sac_agent_main, sac_agentbm,
-        num_frames=100,
+        num_frames=1000,
         consta=consta,
         plot=True,
         figure_dir="./Figures/evaluate",
         scenario_seed=None,
         scenario_config=init_scn_config,
     )
+
+    print_throughput_stats(results_main, results_bm)
 
 main()
