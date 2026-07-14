@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from combine.common.common import MLP, GaussianPolicy, ReplayBuffer
+import torch.nn.functional as F
 
 
 class SACAgent:
@@ -60,7 +61,7 @@ class SACAgent:
         self.replay_buffer = ReplayBuffer(forSAC=True)
 
         # --- Entropy tuning (correct, register log_alpha as Parameter)
-        self.target_entropy = -float(self.action_dim)
+        self.target_entropy = -0.5 * float(self.action_dim)
 
         init_alpha = float(self.alpha) if hasattr(self, "alpha") else float(0.3)
         # register as nn.Parameter so it's in model.parameters()/state_dict()
@@ -85,7 +86,8 @@ class SACAgent:
         with torch.no_grad():
             action_sample, _, _ = self.actor.sample(state)
 
-        action = torch.sigmoid(action_sample)
+        # Chuyển [-1,1] -> [0,1]
+        action = (action_sample + 1.0) * 0.5
 
         action = action.view(
             self.num_rus,
@@ -93,206 +95,214 @@ class SACAgent:
             self.num_slices
         )
 
+        eps = 1e-8
+
         for r in range(self.num_rus):
             for b in range(self.num_bwp_ru[r]):
 
-                # bỏ allocation rất nhỏ
-                action[r, b][action[r, b] < 0.02] = 0.0
+                action[r, b] = torch.clamp(action[r, b], 0.0, 1.0)
+
+                # bỏ allocation quá nhỏ
+                action[r, b][action[r, b] < 0.01] = 0.0
 
                 total = action[r, b].sum()
 
-                if total > 0:
+                if total > eps:
 
-                    # Pattern
+                    # pattern
                     pattern = action[r, b] / total
 
-                    # Budget sử dụng (0.3 ~ 1.0)
-                    usage = torch.clamp(total / self.num_slices, 0.7, 0.95)
+                    # Budget sử dụng
+                    usage = total / self.num_slices
+
+                    # Mở rộng khoảng budget
+                    usage = torch.pow(usage, 0.7)
+
+                    usage = torch.clamp(usage, 0.0, 1.0)
+                    usage = min(1.1 * usage, 1)
 
                     action[r, b] = pattern * usage
+
+                else:
+
+                    action[r, b].zero_()
 
         return action.squeeze(0).cpu().numpy()
 
     def update(self, step, policy_delay, last_actor_loss, batch_size, debug=False):
-        """
-        Stable SAC update with per-dim entropy tuning.
-        Returns: actor_loss_scalar (float), critic_loss_scalar (float), updated_last_actor_loss (torch.Tensor scalar)
-        """
+
         if len(self.replay_buffer) < batch_size:
             return 0.0, 0.0, last_actor_loss
 
-        # ----------------------------
-        # Sample batch and convert to tensors
-        # ----------------------------
-        states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
+        # ==========================================================
+        # Sample replay
+        # ==========================================================
+        states, actions, rewards, next_states, dones = \
+            self.replay_buffer.sample(batch_size)
+
         states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
         actions = torch.as_tensor(actions, dtype=torch.float32, device=self.device)
         rewards = torch.as_tensor(rewards, dtype=torch.float32, device=self.device)
         next_states = torch.as_tensor(next_states, dtype=torch.float32, device=self.device)
         dones = torch.as_tensor(dones, dtype=torch.float32, device=self.device)
 
-        # local alpha value (do NOT mutate self.alpha here)
-        alpha_val = float(self.log_alpha.exp().clamp(1e-8, 10.0))
-
-        # ----------------------------
-        # 1) Compute target Q value (use next actions)
-        # ----------------------------
+        # ==========================================================
+        # Critic target
+        # ==========================================================
         with torch.no_grad():
-            next_actions, next_log_pi, _ = self.actor.sample(next_states)  # next_log_pi expected [B,1] (sum)
-            # ensure shape and clamp for safety
-            next_log_pi = next_log_pi.view(-1, 1).clamp(min=-100.0, max=100.0)
 
-            target_q1 = self.target_critic_1(torch.cat([next_states, next_actions], dim=-1))
-            target_q2 = self.target_critic_2(torch.cat([next_states, next_actions], dim=-1))
-            target_q_min = torch.min(target_q1, target_q2)
+            next_action, next_log_pi, _ = self.actor.sample(next_states)
 
-            target_q = target_q_min - alpha_val * next_log_pi
-            target_q = rewards + (1.0 - dones) * self.gamma * target_q
+            target_q1 = self.target_critic_1(
+                torch.cat([next_states, next_action], dim=-1)
+            )
 
-            # optional clamp if you keep seeing huge numbers (uncomment while debugging)
-            # target_q = torch.clamp(target_q, -1e6, 1e6)
+            target_q2 = self.target_critic_2(
+                torch.cat([next_states, next_action], dim=-1)
+            )
 
-        # ----------------------------
-        # 2) Compute current Q and critic loss
-        # ----------------------------
-        current_q1 = self.critic_1(torch.cat([states, actions], dim=-1))
-        current_q2 = self.critic_2(torch.cat([states, actions], dim=-1))
+            target_q = torch.min(target_q1, target_q2)
 
+            target = rewards + \
+                    (1.0 - dones) * self.gamma * \
+                    (target_q - self.alpha * next_log_pi)
 
-        critic_loss_fn = nn.SmoothL1Loss()
-        critic_1_loss = critic_loss_fn(current_q1, target_q)
-        critic_2_loss = critic_loss_fn(current_q2, target_q)
-        critic_loss = 0.5 * (critic_1_loss + critic_2_loss)
+        # ==========================================================
+        # Critic update
+        # ==========================================================
+        current_q1 = self.critic_1(
+            torch.cat([states, actions], dim=-1)
+        )
 
-        # Guard NaN/Inf
-        if not torch.isfinite(critic_1_loss).all() or not torch.isfinite(critic_2_loss).all():
-            if debug:
-                print("Skipping update: critic loss NaN/Inf", critic_1_loss, critic_2_loss)
-            return 0.0, 0.0, last_actor_loss
+        current_q2 = self.critic_2(
+            torch.cat([states, actions], dim=-1)
+        )
 
-        # ----------------------------
-        # 3) Update critics
-        # ----------------------------
-        self.critic_1_opt.zero_grad(set_to_none=True)
-        critic_1_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.critic_1.parameters(), max_norm=0.5)
+        critic_loss1 = F.smooth_l1_loss(current_q1, target)
+        critic_loss2 = F.smooth_l1_loss(current_q2, target)
+
+        critic_loss = critic_loss1 + critic_loss2
+
+        self.critic_1_opt.zero_grad()
+        critic_loss1.backward()
+        torch.nn.utils.clip_grad_norm_(
+            self.critic_1.parameters(),
+            5.0
+        )
         self.critic_1_opt.step()
 
-        self.critic_2_opt.zero_grad(set_to_none=True)
-        critic_2_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.critic_2.parameters(), max_norm=0.5)
+        self.critic_2_opt.zero_grad()
+        critic_loss2.backward()
+        torch.nn.utils.clip_grad_norm_(
+            self.critic_2.parameters(),
+            5.0
+        )
         self.critic_2_opt.step()
 
-        # ----------------------------
-        # 4) Actor update (delayed)
-        # ----------------------------
-        actor_loss_tensor = torch.tensor(0.0, device=self.device)
+        # ==========================================================
+        # Actor update
+        # ==========================================================
+        actor_loss = last_actor_loss
 
-        # sample new actions & log_prob_sum & mean for current states
-        # IMPORTANT: sample() must return (action, log_prob_sum, mean)
-        new_actions, log_pi_sum, mean = self.actor.sample(states)
+        if step % policy_delay == 0:
 
-        # enforce correct shape and clamp
-        log_pi_sum = log_pi_sum.view(-1, 1).clamp(min=-100.0, max=100.0)
+            new_action, log_pi, mean = self.actor.sample(states)
 
-        if step % max(1, policy_delay) == 0:
-            q1_new = self.critic_1(torch.cat([states, new_actions], dim=-1))
-            q2_new = self.critic_2(torch.cat([states, new_actions], dim=-1))
-            q_new_min = torch.min(q1_new, q2_new)
+            q1 = self.critic_1(
+                torch.cat([states, new_action], dim=-1)
+            )
 
-            # actor objective: minimize (alpha * log_pi_sum - Q)
-            actor_loss_tensor = (alpha_val * log_pi_sum - q_new_min).mean()
+            q2 = self.critic_2(
+                torch.cat([states, new_action], dim=-1)
+            )
 
-            # small regularizers to avoid tanh saturation & very large means
-            mean_penalty_coeff = 1e-4
-            mean_penalty = mean.pow(2).mean() * mean_penalty_coeff
-            action_penalty_coeff = 5e-4
-            action_penalty = (new_actions / max(1.0, float(self.action_scale))).pow(2).mean() * action_penalty_coeff
+            q = torch.min(q1, q2)
 
-            actor_loss_tensor = actor_loss_tensor + mean_penalty + action_penalty
+            actor_loss = (
+                self.alpha * log_pi - q
+            ).mean()
 
-            # guards before backward
-            if not torch.isfinite(actor_loss_tensor).all():
-                if debug:
-                    print("Skipping actor update: NaN/Inf actor_loss")
-                actor_loss_tensor = torch.tensor(0.0, device=self.device)
-            else:
-                # clip huge actor_loss (prevent numeric explosion)
-                if torch.abs(actor_loss_tensor) > 1e6:
-                    if debug:
-                        print("Clamping huge actor_loss before backward:", float(actor_loss_tensor.item()))
-                    actor_loss_tensor = actor_loss_tensor.clamp(-1e6, 1e6)
+            self.actor_opt.zero_grad()
+            actor_loss.backward()
 
-                self.actor_opt.zero_grad(set_to_none=True)
-                actor_loss_tensor.backward()
-                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=0.5)
-                self.actor_opt.step()
+            torch.nn.utils.clip_grad_norm_(
+                self.actor.parameters(),
+                5.0
+            )
 
-            # save last actor loss as detached scalar tensor
-            last_actor_loss = actor_loss_tensor.detach().clone()
-            if last_actor_loss.dim() != 0:
-                last_actor_loss = last_actor_loss.mean().detach()
-        else:
-            # reuse last_actor_loss for logging only
-            if isinstance(last_actor_loss, torch.Tensor):
-                actor_loss_tensor = last_actor_loss.detach().clone().to(self.device)
-                if actor_loss_tensor.dim() != 0:
-                    actor_loss_tensor = actor_loss_tensor.mean()
-            else:
-                actor_loss_tensor = torch.tensor(float(last_actor_loss), device=self.device)
+            self.actor_opt.step()
 
-        # ----------------------------
-        # 5) Dynamic target entropy & Alpha update (per-dim)
-        # ----------------------------
-        # compute per-dim log-prob from the current summed log prob
-        log_pi_per_dim = (log_pi_sum / float(self.action_dim)).clamp(min=-10.0, max=5.0)
+            last_actor_loss = actor_loss.detach()
 
-        with torch.no_grad():
-            avg_per_dim_ent = -log_pi_per_dim.mean().item()
-            self.target_entropy = -0.1 * float(np.tanh(avg_per_dim_ent))
+        # ==========================================================
+        # Alpha update
+        # ==========================================================
+        _, log_pi, _ = self.actor.sample(states)
 
-        # clamp log_alpha (in-place) then compute alpha loss using per-dim log-prob
-        with torch.no_grad():
-            self.log_alpha.data.clamp_(-16.0, 2.0)
+        alpha_loss = -(
+            self.log_alpha *
+            (log_pi + self.target_entropy).detach()
+        ).mean()
 
-        target_entropy_tensor = torch.tensor(self.target_entropy, dtype=torch.float32, device=self.device)
-        alpha_loss = -(self.log_alpha * (log_pi_per_dim + target_entropy_tensor).detach()).mean()
-
-        self.alpha_opt.zero_grad(set_to_none=True)
+        self.alpha_opt.zero_grad()
         alpha_loss.backward()
         self.alpha_opt.step()
 
-        # update scalar alpha for use elsewhere (consistent with alpha_val usage)
-        self.alpha = float(self.log_alpha.exp().clamp(1e-8, 10.0).item())
+        self.alpha = self.log_alpha.exp().item()
 
-        # ----------------------------
-        # 6) Soft target update
-        # ----------------------------
+        # ==========================================================
+        # Soft update
+        # ==========================================================
         with torch.no_grad():
-            for t_param, param in zip(self.target_critic_1.parameters(), self.critic_1.parameters()):
-                t_param.copy_(t_param * (1.0 - self.tau) + param * self.tau)
-            for t_param, param in zip(self.target_critic_2.parameters(), self.critic_2.parameters()):
-                t_param.copy_(t_param * (1.0 - self.tau) + param * self.tau)
 
-        # ----------------------------
-        # 7) Debugging & return
-        # ----------------------------
-        if debug:
-            try:
-                stats = {
-                    "actor_loss": float(actor_loss_tensor.item()),
-                    "critic_loss": float(critic_loss.item()),
-                    "Q_cur_mean": float(current_q1.mean().item()),
-                    "target_Q_mean": float(target_q.mean().item()),
-                    "alpha": float(self.alpha),
-                    "log_pi_sum_mean": float(log_pi_sum.mean().item()),
-                    "log_pi_per_dim_mean": float(log_pi_per_dim.mean().item())
-                }
-                print("SAC update stats:", stats)
-                if log_pi_sum.mean().item() > 0:
-                    print("WARNING: log_pi_sum > 0 (should not happen):", log_pi_sum.mean().item())
-            except Exception:
-                pass
+            for tp, p in zip(
+                    self.target_critic_1.parameters(),
+                    self.critic_1.parameters()):
+                tp.data.mul_(1 - self.tau)
+                tp.data.add_(self.tau * p.data)
 
-        return float(actor_loss_tensor.item()), float(critic_loss.item()), last_actor_loss
+            for tp, p in zip(
+                    self.target_critic_2.parameters(),
+                    self.critic_2.parameters()):
+                tp.data.mul_(1 - self.tau)
+                tp.data.add_(self.tau * p.data)
+
+        # ==========================================================
+        # Debug
+        # ==========================================================
+        if debug and step % 500 == 0:
+
+            print("=" * 60)
+            print(f"Step: {step}")
+
+            print(f"Reward          : {rewards.mean().item():.4f}")
+
+            print(f"Critic loss     : {critic_loss.item():.4f}")
+            print(f"Actor loss      : {actor_loss.item():.4f}")
+
+            print(f"Q mean          : {q.mean().item():.4f}")
+            print(f"Target Q mean   : {target.mean().item():.4f}")
+
+            print(f"Alpha           : {self.alpha:.5f}")
+            print(f"Alpha loss      : {alpha_loss.item():.4f}")
+
+            print(f"log_pi mean     : {log_pi.mean().item():.4f}")
+
+            print(f"Mean(abs)       : {mean.abs().mean().item():.4f}")
+
+            std = self.actor.forward(states)[1].exp()
+
+            print(f"Std mean        : {std.mean().item():.4f}")
+
+            entropy = -log_pi.mean().item()
+
+            print(f"Entropy         : {entropy:.4f}")
+
+            print("=" * 60)
+
+        return (
+            float(actor_loss.item()),
+            float(critic_loss.item()),
+            last_actor_loss
+        )
 

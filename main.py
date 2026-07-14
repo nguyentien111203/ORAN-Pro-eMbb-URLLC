@@ -82,7 +82,7 @@ def main():
         RUs, embb_slices, urllc_slices,
         frame_env_main_base, frame_env_bm_base,
         sac_agent_main, sac_agentbm,
-        num_frames=1000,
+        num_frames=500,
         consta=consta,
         plot=True,
         figure_dir="./Figures/evaluate",

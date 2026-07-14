@@ -50,41 +50,23 @@ class GaussianPolicy(nn.Module):
 
     def sample(self, state):
         mean, log_std = self.forward(state)
+
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
 
-        # ---- 1) Sample pre-tanh ----
+        # Sample
         x_t = normal.rsample()
-
-        # clamp pre-tanh to avoid extreme saturation
         x_t = torch.clamp(x_t, -8.0, 8.0)
 
-        # ---- 2) Apply tanh squash ----
+        # Tanh squash (SAC chuẩn)
         y_t = torch.tanh(x_t)
-        # avoid exact ±1.0 to keep log(1 - y^2) finite
-        y_t = torch.clamp(y_t, -0.999, 0.999)
 
-        # ---- 3) Compute correct log-prob with tanh correction ----
-        # raw normal log_prob
-        raw_lp = normal.log_prob(x_t)                     # [B, act_dim]
-        raw_lp_sum = raw_lp.sum(dim=-1, keepdim=True)     # [B, 1]
+        # Log probability với correction
+        log_prob = normal.log_prob(x_t)
+        log_prob -= torch.log(1 - y_t.pow(2) + 1e-6)
+        log_prob = log_prob.sum(dim=-1, keepdim=True)
 
-        # tanh jacobian correction
-        jac = torch.log(1 - y_t.pow(2) + 1e-6)            # <= 0
-        jac = torch.clamp(jac, min=-3.0, max=0.0)         # avoid huge spikes
-        jac_sum = jac.sum(dim=-1, keepdim=True)           # [B, 1]
-
-        # final correct log_prob
-        log_prob = raw_lp_sum - jac_sum                   # [B, 1]
-
-        # ---- 4) Produce final action ----
-        action = y_t * self.action_scale + self.action_bias
-
-        # ---- 5) Debug (optional) ----
-        #with torch.no_grad():
-        #    frac_saturated = (y_t.abs() > 0.995).float().mean().item()
-        #    max_abs_y = float(y_t.abs().max().item())
-            #print(f"[DBG] tanh saturate fraction = {frac_saturated:.4f}, max|y| = {max_abs_y:.4f}")
+        action = y_t
 
         return action, log_prob, mean
 

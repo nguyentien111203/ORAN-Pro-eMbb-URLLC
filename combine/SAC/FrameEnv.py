@@ -159,6 +159,7 @@ class FrameEnv(gym.Env):
             # Kết quả dạng phẳng
             flatlatency = self.pac / numBits
             flat_urllc_rate = flatlatency / self.lat_target
+            flat_urllc_rate = np.minimum(flat_urllc_rate, 5.0)
             flat_embb_rate = Thr / self.thr_min
 
             self.rate_dict["avg_embb"].append(np.average(np.average(flat_embb_rate)))
@@ -228,14 +229,8 @@ class FrameEnv(gym.Env):
         # ============================
         # eMBB reward: throughput target
         # ============================
-        eMBB_gap = []
-
-        for s in range(len(self.eMBB_frame_avg)):
-            for u in range(len(self.eMBB_frame_avg[s])):
-                rate = self.eMBB_frame_avg[s][u]
-                eMBB_gap.append(max(1 - rate, 0))
-
-        embb_gap = np.mean(eMBB_gap)
+        throughput_bonus = np.mean(self.eMBB_frame_avg)
+        throughput_bonus = np.minimum(throughput_bonus, 1.5)
 
 
         # ============================
@@ -267,7 +262,7 @@ class FrameEnv(gym.Env):
 
         # tránh một vài UE/slice bị bỏ rơi
         urllc_fair = np.std(urllc_values)
-        total_qos = urllc_reward - embb_gap
+        total_qos = urllc_reward + throughput_bonus
 
         band_eff = total_qos / (np.sum(self.avg_rate) + 1e-7)
 
@@ -288,9 +283,14 @@ class FrameEnv(gym.Env):
         # ============================
         reward = (
             self.w_reward["lat"] * (urllc_reward - 1.3 * urllc_fair)
-            - self.w_reward["thr"] * embb_gap
+            + self.w_reward["thr"] * throughput_bonus
             + self.w_reward["cost"] * cost_reward + 0.3* band_eff 
         )
+
+        #print("embb_gap =", throughput_bonus, '\n')
+        #print("urllc_reward =", urllc_reward, '\n')
+        #print("cost_reward =", cost_reward, '\n')
+        #print("reward =", reward, '\n')
 
         info = {
             "thr": np.average(embb_frame_sum) / (self.num_embb * len(self.embb_slices[0].ue_set)),
@@ -357,7 +357,7 @@ class FrameEnv(gym.Env):
             lats = np.array(self.URLLC_frame_avg[s])
             avgLatRate.append(np.max(self.URLLC_frame_avg[s]))
             p90_rate.append(np.percentile(self.URLLC_frame_avg[s],90))
-            gap.append(min(1 - max(lats),0))
+            gap.append(max(max(lats) - 1, 0))
             if self.avg_rate[s + self.num_embb] == 0.0:
                 budget_rate_urllc.append(0)
             else :

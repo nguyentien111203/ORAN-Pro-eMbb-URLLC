@@ -2,7 +2,7 @@ import numpy as np
 from tqdm import trange
 from collections import deque
 from combine.general.drawDQN import plot_rate
-
+MAX_LAT_RATIO = 5.0
 def train_dqn(envs, agents, num_episodes, initBWP_slice):
 
     num_ru = len(envs)
@@ -75,7 +75,7 @@ def train_dqn(envs, agents, num_episodes, initBWP_slice):
             # ================= METRICS =================
             urllc_lat = pac / (numBits + 1e-8)
 
-            urllc_rate = urllc_lat / (lat_target + 1e-8)
+            urllc_rate = np.minimum(urllc_lat / (lat_target + 1e-8), MAX_LAT_RATIO)
             embb_rate = totalThr / (thr_min + 1e-8)
 
             # ================= STEP =================

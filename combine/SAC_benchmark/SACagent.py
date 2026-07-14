@@ -85,7 +85,7 @@ class SACAgentBM:
             action_sample, _, _ = self.actor.sample(state)
 
         # [-1,1] -> [0,1]
-        raw_action = (action_sample + 1.0) / 2.0
+        raw_action = (action_sample + 1.0) * 0.5
 
         action = raw_action.reshape(
             self.num_rus,
@@ -93,7 +93,9 @@ class SACAgentBM:
             self.num_slices
         )
 
+        # ======================================================
         # Mỗi slice chỉ chọn một BWP
+        # ======================================================
         for r in range(self.num_rus):
             for s in range(self.num_slices):
 
@@ -104,14 +106,29 @@ class SACAgentBM:
                 action[r, :, s] = 0.0
                 action[r, best_bwp, s] = keep
 
-        # Chuẩn hóa để dùng hết PRB của từng BWP
+        # ======================================================
+        # Chuẩn hóa theo budget sử dụng
+        # Không dùng hết toàn bộ PRB
+        # ======================================================
+        eps = 1e-8
+
         for r in range(self.num_rus):
             for b in range(self.num_bwp_ru[r]):
 
                 total = action[r, b].sum()
 
-                if total > 1e-8:
-                    action[r, b] /= total
+                if total > eps:
+
+                    pattern = action[r, b] / total
+
+                    # sử dụng khoảng giữa 70 - 95% PRB của BWP
+                    usage = np.random.uniform(0.6, 0.8)
+
+                    action[r, b] = pattern * usage
+
+                else:
+
+                    action[r, b].zero_()
 
         return action.detach().cpu().numpy()
 

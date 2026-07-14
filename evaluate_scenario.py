@@ -186,8 +186,8 @@ def evaluate_scenario(
             #print(info_main["thr"], '\n')
             #print(info_bm["thr"], '\n')
 
-            results_main['latency'].extend(info_main["lat"])
-            results_bm['latency'].extend(info_bm["lat"])
+            results_main['latency'][scenario_type].extend(info_main["lat"])
+            results_bm['latency'][scenario_type].extend(info_bm["lat"])
 
             results_main["energy_cost"].append(info_main["costE"])
             results_bm["energy_cost"].append(info_bm["costE"])
@@ -204,7 +204,7 @@ def evaluate_scenario(
             results_main["resource_efficiency"].append(info_main["resource_eff"])
             results_bm["resource_efficiency"].append(info_bm["resource_eff"])
 
-            frame_dt += 1
+            frame_dt += 0.01
 
     # ------------------------------------------------------------------
     # Bước 5 (tuỳ chọn): Vẽ biểu đồ
@@ -222,7 +222,11 @@ def evaluate_scenario(
 def _empty_results():
     return {
         "throughput"         : [],
-        "latency"            : [],
+        "latency"            : {
+            "low" : [], 
+            "stable": [], 
+            "high": []
+        },
         "resource_efficiency": [],
         "energy_cost"        : [],
         "fragment_cost"      : [],
@@ -369,66 +373,67 @@ def _plot_results(results_main, results_bm, figure_dir):
     # ======================================================
     # Transmission Delay CDF
     # ======================================================
+    SCENARIO = ["low", "stable", "high"]   # "stable" | "low" | "high" (xem mobility trong scenario.py)
+    for scenario_type in SCENARIO:
+        plt.figure(figsize=(8, 5))
 
-    plt.figure(figsize=(8, 5))
+        # Sort data
+        data_main = np.sort(np.asarray(results_main["latency"][scenario_type]))
+        data_bm   = np.sort(np.asarray(results_bm["latency"][scenario_type]))
 
-    # Sort data
-    data_main = np.sort(np.asarray(results_main["latency"]))
-    data_bm   = np.sort(np.asarray(results_bm["latency"]))
+        # ECDF
+        cdf_main = np.arange(1, len(data_main) + 1) / len(data_main)
+        cdf_bm   = np.arange(1, len(data_bm) + 1) / len(data_bm)
 
-    # ECDF
-    cdf_main = np.arange(1, len(data_main) + 1) / len(data_main)
-    cdf_bm   = np.arange(1, len(data_bm) + 1) / len(data_bm)
+        # Nếu muốn bỏ 0 vì log scale không vẽ được
+        eps = 1e-12
+        data_main = np.maximum(data_main, eps)
+        data_bm   = np.maximum(data_bm, eps)
 
-    # Nếu muốn bỏ 0 vì log scale không vẽ được
-    eps = 1e-12
-    data_main = np.maximum(data_main, eps)
-    data_bm   = np.maximum(data_bm, eps)
+        # CDF
+        plt.step(
+            data_main,
+            cdf_main,
+            where="post",
+            color="steelblue",
+            linewidth=2,
+            label="Framework"
+        )
 
-    # CDF
-    plt.step(
-        data_main,
-        cdf_main,
-        where="post",
-        color="steelblue",
-        linewidth=2,
-        label="Framework"
-    )
+        plt.step(
+            data_bm,
+            cdf_bm,
+            where="post",
+            color="tomato",
+            linewidth=2,
+            linestyle="--",
+            label="Benchmark"
+        )
 
-    plt.step(
-        data_bm,
-        cdf_bm,
-        where="post",
-        color="tomato",
-        linewidth=2,
-        linestyle="--",
-        label="Benchmark"
-    )
+        # Nếu delay trải dài nhiều bậc thì bật log scale
+        plt.xscale("log")
 
-    # Nếu delay trải dài nhiều bậc thì bật log scale
-    plt.xscale("log")
+        # Hoặc nếu không muốn log thì comment dòng trên
+        # và dùng đoạn dưới để cắt outlier:
+        #
+        # xmax = np.percentile(
+        #     np.concatenate([data_main, data_bm]),
+        #     99.5
+        # )
+        # plt.xlim(0, xmax)
 
-    # Hoặc nếu không muốn log thì comment dòng trên
-    # và dùng đoạn dưới để cắt outlier:
-    #
-    # xmax = np.percentile(
-    #     np.concatenate([data_main, data_bm]),
-    #     99.5
-    # )
-    # plt.xlim(0, xmax)
+        plt.xlabel(f"Transmission Delay (s) on {scenario_type} mobility")
+        plt.ylabel("Empirical CDF")
+        plt.title("CDF of URLLC Transmission Delay")
 
-    plt.xlabel("Transmission Delay (s)")
-    plt.ylabel("Empirical CDF")
-    plt.title("CDF of URLLC Transmission Delay")
+        plt.grid(True, which="both", linestyle="--", alpha=0.5)
+        plt.legend()
 
-    plt.grid(True, which="both", linestyle="--", alpha=0.5)
-    plt.legend()
+        plt.tight_layout()
+        plt.savefig(f"{figure_dir}/latency_{scenario_type}.png", dpi=300)
+        plt.close()
 
-    plt.tight_layout()
-    plt.savefig(f"{figure_dir}/latency.png", dpi=300)
-    plt.close()
-
-    print(f"[PLOT] {figure_dir}/latency.png")
+        print(f"[PLOT] {figure_dir}/latency_{scenario_type}.png")
 
 
 # ==============================================================================
