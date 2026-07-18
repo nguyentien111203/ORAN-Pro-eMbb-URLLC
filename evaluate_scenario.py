@@ -163,15 +163,15 @@ def evaluate_scenario(
             action_bm   = sac_agent2.select_action(state_bm)
 
             # Tính slice_budget từ quota SAC
-            budget_main = _calc_slice_budget(action_main, RUs, num_embb + num_urllc, total_prb_system)
-            budget_bm   = _calc_slice_budget(action_bm,   RUs, num_embb + num_urllc, total_prb_system)
+            #budget_main = _calc_slice_budget(action_main, RUs, num_embb + num_urllc, total_prb_system)
+            #budget_bm   = _calc_slice_budget(action_bm,   RUs, num_embb + num_urllc, total_prb_system)
 
-            results_main["slice_budget"].append(budget_main)
-            results_bm["slice_budget"].append(budget_bm)
+            #results_main["slice_budget"].append(budget_main)
+            #results_bm["slice_budget"].append(budget_bm)
 
             # Tính entropy của action SAC theo công thức H = -sum(p * log2(p))
-            results_main["action_entropy"].append(_action_entropy(action_main))
-            results_bm["action_entropy"].append(_action_entropy(action_bm))
+            #results_main["action_entropy"].append(_action_entropy(action_main))
+            #results_bm["action_entropy"].append(_action_entropy(action_bm))
 
             # ------------------------------------------------------------------
             # Bước 4: Chạy từng slot trong frame, thu thập KPI
@@ -180,8 +180,8 @@ def evaluate_scenario(
             state_main, _, info_main, _ = frame_env_main.step(action_main)
             state_bm, _, info_bm, _ = frame_env_bm.step(action_bm)
 
-            results_main['throughput'].append(info_main["thr"])
-            results_bm['throughput'].append(info_bm["thr"])
+            results_main['throughput'][scenario_type].append(info_main["thr"])
+            results_bm['throughput'][scenario_type].append(info_bm["thr"])
 
             #print(info_main["thr"], '\n')
             #print(info_bm["thr"], '\n')
@@ -189,20 +189,20 @@ def evaluate_scenario(
             results_main['latency'][scenario_type].extend(info_main["lat"])
             results_bm['latency'][scenario_type].extend(info_bm["lat"])
 
-            results_main["energy_cost"].append(info_main["costE"])
-            results_bm["energy_cost"].append(info_bm["costE"])
+            results_main["energy_cost"][scenario_type].append(info_main["costE"])
+            results_bm["energy_cost"][scenario_type].append(info_bm["costE"])
 
-            results_main["fragment_cost"].append(info_main["costF"])
-            results_bm["fragment_cost"].append(info_bm["costF"])
+            #results_main["fragment_cost"].append(info_main["costF"])
+            #results_bm["fragment_cost"].append(info_bm["costF"])
 
-            results_main["switch_cost"].append(info_main["costS"])
-            results_bm["switch_cost"].append(info_bm["costS"])
+            #results_main["switch_cost"].append(info_main["costS"])
+            #results_bm["switch_cost"].append(info_bm["costS"])
 
-            results_main["guardband_cost"].append(info_main["costGB"])
-            results_bm["guardband_cost"].append(info_bm["costGB"])
+            #results_main["guardband_cost"].append(info_main["costGB"])
+            #results_bm["guardband_cost"].append(info_bm["costGB"])
 
-            results_main["resource_efficiency"].append(info_main["resource_eff"])
-            results_bm["resource_efficiency"].append(info_bm["resource_eff"])
+            results_main["resource_efficiency"][scenario_type].append(info_main["resource_eff"])
+            results_bm["resource_efficiency"][scenario_type].append(info_bm["resource_eff"])
 
             frame_dt += 0.01
 
@@ -221,14 +221,26 @@ def evaluate_scenario(
 
 def _empty_results():
     return {
-        "throughput"         : [],
+        "throughput"         : {
+            "low" : [], 
+            "stable": [], 
+            "high": []
+        },
         "latency"            : {
             "low" : [], 
             "stable": [], 
             "high": []
         },
-        "resource_efficiency": [],
-        "energy_cost"        : [],
+        "resource_efficiency": {
+            "low" : [], 
+            "stable": [], 
+            "high": []
+        },
+        "energy_cost"        : {
+            "low" : [], 
+            "stable": [], 
+            "high": []
+        },
         "fragment_cost"      : [],
         "switch_cost"        : [],
         "guardband_cost"     : [],
@@ -321,14 +333,9 @@ def _plot_results(results_main, results_bm, figure_dir):
     """
 
     line_metrics = [
-        ("throughput",          "Throughput (bps)",    "Throughput"),
+        ("throughput",          "Throughput (Mbps)",    "Throughput"),
         ("resource_efficiency", "Resource Efficiency", "Resource Efficiency"),
-        ("energy_cost",         "Energy Cost",         "Energy Cost"),
-        ("fragment_cost",       "Fragment Cost",       "Fragment Cost"),
-        ("switch_cost",         "Switch Cost",         "Switch Cost"),
-        ("guardband_cost",      "Guardband Cost",      "Guardband Cost"),
-        ("slice_budget",        "Slice Budget Ratio",  "Slice Budget"),
-        ("action_entropy",      "Action Entropy (bits)", "Action Entropy"),
+        ("energy_cost",         "Energy Cost",         "Energy Cost")
     ]
 
     xlabel = {
@@ -339,42 +346,42 @@ def _plot_results(results_main, results_bm, figure_dir):
     # ======================================================
     # Line plots
     # ======================================================
-    for key, ylabel, title in line_metrics:
+    SCENARIO = ["low", "stable", "high"]   # "stable" | "low" | "high" (xem mobility trong scenario.py)
+    for scenario_type in SCENARIO:
+        for key, ylabel, title in line_metrics:
 
-        plt.figure(figsize=(10, 4))
+            plt.figure(figsize=(10, 4))
 
-        plt.plot(
-            results_main[key],
-            color="steelblue",
-            linewidth=1.8,
-            label="Framework"
-        )
+            plt.plot(
+                results_main[key][scenario_type],
+                color="steelblue",
+                linewidth=1.8,
+                label="Framework"
+            )
 
-        plt.plot(
-            results_bm[key],
-            color="tomato",
-            linewidth=1.8,
-            label="Benchmark"
-        )
+            plt.plot(
+                results_bm[key][scenario_type],
+                color="tomato",
+                linewidth=1.8,
+                label="Benchmark"
+            )
 
-        plt.xlabel(xlabel.get(key, "Slot"))
-        plt.ylabel(ylabel)
-        plt.title(title)
+            plt.xlabel(xlabel.get(key, "Frame"))
+            plt.ylabel(f"{ylabel} in {scenario_type}")
+            plt.title(title)
 
-        plt.grid(True, linestyle="--", alpha=0.5)
-        plt.legend()
-        plt.tight_layout()
+            plt.grid(True, linestyle="--", alpha=0.5)
+            plt.legend()
+            plt.tight_layout()
 
-        plt.savefig(f"{figure_dir}/{key}.png", dpi=150)
-        plt.close()
+            plt.savefig(f"{figure_dir}/{key}.png", dpi=150)
+            plt.close()
 
-        print(f"[PLOT] {figure_dir}/{key}.png")
+            print(f"[PLOT] {figure_dir}/{key}.png")
 
     # ======================================================
     # Transmission Delay CDF
     # ======================================================
-    SCENARIO = ["low", "stable", "high"]   # "stable" | "low" | "high" (xem mobility trong scenario.py)
-    for scenario_type in SCENARIO:
         plt.figure(figsize=(8, 5))
 
         # Sort data

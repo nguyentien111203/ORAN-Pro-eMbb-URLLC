@@ -17,6 +17,12 @@ slices:
   - id: slice_urllc_5
     type: "URLLC"
     ue_set: "[ue_40, ue_41, ue_42, ue_43, ue_44, ue_45, ue_46, ue_47]" # Lấy là tập id của các UE
+  - id: slice_urllc_6
+    type: "URLLC"
+    ue_set: "[ue_72, ue_73, ue_74, ue_75, ue_76, ue_77, ue_78, ue_79]" # Lấy là tập id của các UE
+  - id: slice_urllc_5
+    type: "URLLC"
+    ue_set: "[ue_80, ue_81, ue_82, ue_83, ue_84, ue_85, ue_86, ue_87]" # Lấy là tập id của các UE
 
 
   - id: slice_embb_0
@@ -28,5 +34,8 @@ slices:
   - id: slice_embb_2
     type: "eMBB"
     ue_set: "[ue_64, ue_65, ue_66, ue_67, ue_68, ue_69, ue_70, ue_71]"
+  - id: slice_embb_3
+    type: "eMBB"
+    ue_set: "[ue_88, ue_89, ue_90, ue_91, ue_92, ue_93, ue_94, ue_95]"
 
 

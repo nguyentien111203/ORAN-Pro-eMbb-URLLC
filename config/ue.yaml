@@ -240,6 +240,87 @@ ues:
     lat: 1.0 # ms
     pac: 32 # byte
 
+  - id: ue_72
+    slice_id: slice_urllc_6
+    lat: 1.0 # ms
+    pac: 32 # byte
+
+  - id: ue_73
+    slice_id: slice_urllc_6
+    lat: 1.0 # ms
+    pac: 32 # byte
+    
+  - id: ue_74
+    slice_id: slice_urllc_6
+    lat: 1.0 # ms
+    pac: 32 # byte
+  
+  - id: ue_75
+    slice_id: slice_urllc_6
+    lat: 1.0 # ms
+    pac: 32 # byte
+
+  - id: ue_76
+    slice_id: slice_urllc_6
+    lat: 1.0 # ms
+    pac: 32 # byte
+    
+  - id: ue_77
+    slice_id: slice_urllc_6
+    lat: 1.0 # ms
+    pac: 32 # byte
+
+  - id: ue_78
+    slice_id: slice_urllc_6
+    lat: 1.0 # ms
+    pac: 32 # byte
+
+  - id: ue_79
+    slice_id: slice_urllc_6
+    lat: 1.0 # ms
+    pac: 32 # byte
+    
+  - id: ue_80
+    slice_id: slice_urllc_7
+    lat: 1.0 # ms
+    pac: 32 # byte
+
+  - id: ue_81
+    slice_id: slice_urllc_7
+    lat: 1.0 # ms
+    pac: 32 # byte
+
+  - id: ue_82
+    slice_id: slice_urllc_7
+    lat: 1.0 # ms
+    pac: 32 # byte
+    
+  - id: ue_83
+    slice_id: slice_urllc_7
+    lat: 1.0 # ms
+    pac: 32 # byte
+
+  - id: ue_84
+    slice_id: slice_urllc_7
+    lat: 1.0 # ms
+    pac: 32 # byte
+
+  - id: ue_85
+    slice_id: slice_urllc_7
+    lat: 1.0 # ms
+    pac: 32 # byte
+    
+  - id: ue_86
+    slice_id: slice_urllc_7
+    lat: 1.0 # ms
+    pac: 32 # byte
+
+  - id: ue_87
+    slice_id: slice_urllc_7
+    lat: 1.0 # ms
+    pac: 32 # byte
+
+    
   # Các UE thuộc slice_embb_0
   - id: ue_48
     slice_id: slice_embb_0
@@ -335,6 +416,38 @@ ues:
 
   - id: ue_71
     slice_id: slice_embb_2
+    thr: 10 # Mbps
+
+  - id: ue_88
+    slice_id: slice_embb_3
+    thr: 10 # Mbps
+
+  - id: ue_89
+    slice_id: slice_embb_3
+    thr: 10 # Mbps
+
+  - id: ue_90
+    slice_id: slice_embb_3
+    thr: 10 # Mbps
+
+  - id: ue_91
+    slice_id: slice_embb_3
+    thr: 10 # Mbps
+
+  - id: ue_92
+    slice_id: slice_embb_3
+    thr: 10 # Mbps
+
+  - id: ue_93
+    slice_id: slice_embb_3
+    thr: 10 # Mbps
+
+  - id: ue_94
+    slice_id: slice_embb_3
+    thr: 10 # Mbps
+
+  - id: ue_95
+    slice_id: slice_embb_3
     thr: 10 # Mbps
 
   
