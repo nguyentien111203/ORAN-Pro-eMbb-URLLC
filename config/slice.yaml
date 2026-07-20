@@ -20,7 +20,7 @@ slices:
   - id: slice_urllc_6
     type: "URLLC"
     ue_set: "[ue_72, ue_73, ue_74, ue_75, ue_76, ue_77, ue_78, ue_79]" # Lấy là tập id của các UE
-  - id: slice_urllc_5
+  - id: slice_urllc_7
     type: "URLLC"
     ue_set: "[ue_80, ue_81, ue_82, ue_83, ue_84, ue_85, ue_86, ue_87]" # Lấy là tập id của các UE
 

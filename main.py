@@ -76,9 +76,9 @@ def main():
                          trainCons["forDQN"]["dqn_train_episodes"], 
                          trainCons["forSAC"]["sac_train_episodes"], "bm")
 
-    # 6. Chạy đánh giá (kịch bản di động "high" để xem hành vi dưới di chuyển nhanh;
-    #    đổi scenario_type="stable"/"low" tuỳ nhu cầu, giống main của scenario.py)
-    results_main, results_bm = evaluate_scenario(
+    # 6. Chạy đánh giá cho cả 3 kịch bản di động ("low"/"stable"/"high") —
+    #    evaluate_scenario() giờ tự lặp qua cả 3 và trả về dict theo scenario.
+    results_main_all, results_bm_all = evaluate_scenario(
         RUs, embb_slices, urllc_slices,
         frame_env_main_base, frame_env_bm_base,
         sac_agent_main, sac_agentbm,
@@ -90,6 +90,6 @@ def main():
         scenario_config=init_scn_config,
     )
 
-    print_throughput_stats(results_main, results_bm)
+    print_throughput_stats(results_main_all, results_bm_all)
 
 main()

@@ -88,8 +88,10 @@ def evaluate_scenario(
         for bwp in RUs[r].bwps
     )
 
-    results_main = _empty_results()
-    results_bm   = _empty_results()
+    # Mỗi scenario ("low"/"stable"/"high") có kết quả riêng, không gộp chung
+    # -> tránh trộn dữ liệu và tránh ghi đè file ảnh giữa các scenario.
+    results_main_all = {}
+    results_bm_all   = {}
 
     # last_action để action smoothing hoạt động đúng như lúc training
     last_action_main = None
@@ -116,6 +118,10 @@ def evaluate_scenario(
         )
     SCENARIO = ["low", "stable", "high"]   # "stable" | "low" | "high" (xem mobility trong scenario.py)
     for scenario_type in SCENARIO: 
+
+        # Reset kết quả cho scenario hiện tại (không dùng chung với scenario khác)
+        results_main = _empty_results()
+        results_bm   = _empty_results()
 
         mobility_scenario = generate_scenario(scenario_type, seed=scenario_seed, config=scn_config)
 
@@ -163,15 +169,15 @@ def evaluate_scenario(
             action_bm   = sac_agent2.select_action(state_bm)
 
             # Tính slice_budget từ quota SAC
-            #budget_main = _calc_slice_budget(action_main, RUs, num_embb + num_urllc, total_prb_system)
-            #budget_bm   = _calc_slice_budget(action_bm,   RUs, num_embb + num_urllc, total_prb_system)
+            budget_main = _calc_slice_budget(action_main, RUs, num_embb + num_urllc, total_prb_system)
+            budget_bm   = _calc_slice_budget(action_bm,   RUs, num_embb + num_urllc, total_prb_system)
 
-            #results_main["slice_budget"].append(budget_main)
-            #results_bm["slice_budget"].append(budget_bm)
+            results_main["slice_budget"].append(budget_main)
+            results_bm["slice_budget"].append(budget_bm)
 
             # Tính entropy của action SAC theo công thức H = -sum(p * log2(p))
-            #results_main["action_entropy"].append(_action_entropy(action_main))
-            #results_bm["action_entropy"].append(_action_entropy(action_bm))
+            results_main["action_entropy"].append(_action_entropy(action_main))
+            results_bm["action_entropy"].append(_action_entropy(action_bm))
 
             # ------------------------------------------------------------------
             # Bước 4: Chạy từng slot trong frame, thu thập KPI
@@ -180,39 +186,43 @@ def evaluate_scenario(
             state_main, _, info_main, _ = frame_env_main.step(action_main)
             state_bm, _, info_bm, _ = frame_env_bm.step(action_bm)
 
-            results_main['throughput'][scenario_type].append(info_main["thr"])
-            results_bm['throughput'][scenario_type].append(info_bm["thr"])
+            results_main['throughput'].append(info_main["thr"])
+            results_bm['throughput'].append(info_bm["thr"])
 
             #print(info_main["thr"], '\n')
             #print(info_bm["thr"], '\n')
 
-            results_main['latency'][scenario_type].extend(info_main["lat"])
-            results_bm['latency'][scenario_type].extend(info_bm["lat"])
+            results_main['latency'].extend(info_main["lat"])
+            results_bm['latency'].extend(info_bm["lat"])
 
-            results_main["energy_cost"][scenario_type].append(info_main["costE"])
-            results_bm["energy_cost"][scenario_type].append(info_bm["costE"])
+            results_main["energy_cost"].append(info_main["costE"])
+            results_bm["energy_cost"].append(info_bm["costE"])
 
-            #results_main["fragment_cost"].append(info_main["costF"])
-            #results_bm["fragment_cost"].append(info_bm["costF"])
+            results_main["fragment_cost"].append(info_main["costF"])
+            results_bm["fragment_cost"].append(info_bm["costF"])
 
-            #results_main["switch_cost"].append(info_main["costS"])
-            #results_bm["switch_cost"].append(info_bm["costS"])
+            results_main["switch_cost"].append(info_main["costS"])
+            results_bm["switch_cost"].append(info_bm["costS"])
 
-            #results_main["guardband_cost"].append(info_main["costGB"])
-            #results_bm["guardband_cost"].append(info_bm["costGB"])
+            results_main["guardband_cost"].append(info_main["costGB"])
+            results_bm["guardband_cost"].append(info_bm["costGB"])
 
-            results_main["resource_efficiency"][scenario_type].append(info_main["resource_eff"])
-            results_bm["resource_efficiency"][scenario_type].append(info_bm["resource_eff"])
+            results_main["resource_efficiency"].append(info_main["resource_eff"])
+            results_bm["resource_efficiency"].append(info_bm["resource_eff"])
 
-            frame_dt += 0.01
+            frame_dt += 1
 
-    # ------------------------------------------------------------------
-    # Bước 5 (tuỳ chọn): Vẽ biểu đồ
-    # ------------------------------------------------------------------
-    if plot:
-        _plot_results(results_main, results_bm, figure_dir)
+        # ------------------------------------------------------------------
+        # Bước 5 (tuỳ chọn): Vẽ biểu đồ — thực hiện NGAY khi vừa xong 1 scenario,
+        # với tên file gắn hậu tố scenario_type để không ghi đè lẫn nhau.
+        # ------------------------------------------------------------------
+        if plot:
+            _plot_results(results_main, results_bm, figure_dir, suffix=scenario_type)
 
-    return results_main, results_bm
+        results_main_all[scenario_type] = results_main
+        results_bm_all[scenario_type]   = results_bm
+
+    return results_main_all, results_bm_all
 
 
 # ==============================================================================
@@ -221,26 +231,10 @@ def evaluate_scenario(
 
 def _empty_results():
     return {
-        "throughput"         : {
-            "low" : [], 
-            "stable": [], 
-            "high": []
-        },
-        "latency"            : {
-            "low" : [], 
-            "stable": [], 
-            "high": []
-        },
-        "resource_efficiency": {
-            "low" : [], 
-            "stable": [], 
-            "high": []
-        },
-        "energy_cost"        : {
-            "low" : [], 
-            "stable": [], 
-            "high": []
-        },
+        "throughput"         : [],
+        "latency"            : [],
+        "resource_efficiency": [],
+        "energy_cost"        : [],
         "fragment_cost"      : [],
         "switch_cost"        : [],
         "guardband_cost"     : [],
@@ -324,18 +318,28 @@ def _calc_slice_budget(action, RUs, num_slices, total_prb_system):
 # VẼ BIỂU ĐỒ
 # ==============================================================================
 
-def _plot_results(results_main, results_bm, figure_dir):
+def _plot_results(results_main, results_bm, figure_dir, suffix=None):
     """
     Vẽ các KPI trên cùng một biểu đồ:
         - Framework (SAC+DQN): màu xanh
         - Benchmark: màu đỏ
     Latency được biểu diễn bằng CDF.
+
+    suffix : str hoặc None
+        Nếu truyền vào (vd. "low"/"stable"/"high"), tên mỗi file ảnh sẽ có
+        hậu tố "_{suffix}" để phân biệt giữa các scenario, tránh ghi đè.
     """
+    tag = f"_{suffix}" if suffix else ""
 
     line_metrics = [
-        ("throughput",          "Throughput (Mbps)",    "Throughput"),
+        ("throughput",          "Throughput (bps)",    "Throughput"),
         ("resource_efficiency", "Resource Efficiency", "Resource Efficiency"),
-        ("energy_cost",         "Energy Cost",         "Energy Cost")
+        ("energy_cost",         "Energy Cost",         "Energy Cost"),
+        ("fragment_cost",       "Fragment Cost",       "Fragment Cost"),
+        ("switch_cost",         "Switch Cost",         "Switch Cost"),
+        ("guardband_cost",      "Guardband Cost",      "Guardband Cost"),
+        ("slice_budget",        "Slice Budget Ratio",  "Slice Budget"),
+        ("action_entropy",      "Action Entropy (bits)", "Action Entropy"),
     ]
 
     xlabel = {
@@ -346,119 +350,131 @@ def _plot_results(results_main, results_bm, figure_dir):
     # ======================================================
     # Line plots
     # ======================================================
-    SCENARIO = ["low", "stable", "high"]   # "stable" | "low" | "high" (xem mobility trong scenario.py)
-    for scenario_type in SCENARIO:
-        for key, ylabel, title in line_metrics:
+    for key, ylabel, title in line_metrics:
 
-            plt.figure(figsize=(10, 4))
+        plt.figure(figsize=(10, 4))
 
-            plt.plot(
-                results_main[key][scenario_type],
-                color="steelblue",
-                linewidth=1.8,
-                label="Framework"
-            )
+        plt.plot(
+            results_main[key],
+            color="steelblue",
+            linewidth=1.8,
+            label="Framework"
+        )
 
-            plt.plot(
-                results_bm[key][scenario_type],
-                color="tomato",
-                linewidth=1.8,
-                label="Benchmark"
-            )
+        plt.plot(
+            results_bm[key],
+            color="tomato",
+            linewidth=1.8,
+            label="Benchmark"
+        )
 
-            plt.xlabel(xlabel.get(key, "Frame"))
-            plt.ylabel(f"{ylabel} in {scenario_type}")
-            plt.title(title)
+        plt.xlabel(xlabel.get(key, "Slot"))
+        plt.ylabel(ylabel)
+        plt.title(title)
 
-            plt.grid(True, linestyle="--", alpha=0.5)
-            plt.legend()
-            plt.tight_layout()
+        plt.grid(True, linestyle="--", alpha=0.5)
+        plt.legend()
+        plt.tight_layout()
 
-            plt.savefig(f"{figure_dir}/{key}.png", dpi=150)
-            plt.close()
+        plt.savefig(f"{figure_dir}/{key}{tag}.png", dpi=150)
+        plt.close()
 
-            print(f"[PLOT] {figure_dir}/{key}.png")
+        print(f"[PLOT] {figure_dir}/{key}{tag}.png")
 
     # ======================================================
     # Transmission Delay CDF
     # ======================================================
-        plt.figure(figsize=(8, 5))
 
-        # Sort data
-        data_main = np.sort(np.asarray(results_main["latency"][scenario_type]))
-        data_bm   = np.sort(np.asarray(results_bm["latency"][scenario_type]))
+    plt.figure(figsize=(8, 5))
 
-        # ECDF
-        cdf_main = np.arange(1, len(data_main) + 1) / len(data_main)
-        cdf_bm   = np.arange(1, len(data_bm) + 1) / len(data_bm)
+    # Sort data
+    data_main = np.sort(np.asarray(results_main["latency"]))
+    data_bm   = np.sort(np.asarray(results_bm["latency"]))
 
-        # Nếu muốn bỏ 0 vì log scale không vẽ được
-        eps = 1e-12
-        data_main = np.maximum(data_main, eps)
-        data_bm   = np.maximum(data_bm, eps)
+    # ECDF
+    cdf_main = np.arange(1, len(data_main) + 1) / len(data_main)
+    cdf_bm   = np.arange(1, len(data_bm) + 1) / len(data_bm)
 
-        # CDF
-        plt.step(
-            data_main,
-            cdf_main,
-            where="post",
-            color="steelblue",
-            linewidth=2,
-            label="Framework"
-        )
+    # Nếu muốn bỏ 0 vì log scale không vẽ được
+    eps = 1e-12
+    data_main = np.maximum(data_main, eps)
+    data_bm   = np.maximum(data_bm, eps)
 
-        plt.step(
-            data_bm,
-            cdf_bm,
-            where="post",
-            color="tomato",
-            linewidth=2,
-            linestyle="--",
-            label="Benchmark"
-        )
+    # CDF
+    plt.step(
+        data_main,
+        cdf_main,
+        where="post",
+        color="steelblue",
+        linewidth=2,
+        label="Framework"
+    )
 
-        # Nếu delay trải dài nhiều bậc thì bật log scale
-        plt.xscale("log")
+    plt.step(
+        data_bm,
+        cdf_bm,
+        where="post",
+        color="tomato",
+        linewidth=2,
+        linestyle="--",
+        label="Benchmark"
+    )
 
-        # Hoặc nếu không muốn log thì comment dòng trên
-        # và dùng đoạn dưới để cắt outlier:
-        #
-        # xmax = np.percentile(
-        #     np.concatenate([data_main, data_bm]),
-        #     99.5
-        # )
-        # plt.xlim(0, xmax)
+    # Nếu delay trải dài nhiều bậc thì bật log scale
+    plt.xscale("log")
 
-        plt.xlabel(f"Transmission Delay (s) on {scenario_type} mobility")
-        plt.ylabel("Empirical CDF")
-        plt.title("CDF of URLLC Transmission Delay")
+    # Hoặc nếu không muốn log thì comment dòng trên
+    # và dùng đoạn dưới để cắt outlier:
+    #
+    # xmax = np.percentile(
+    #     np.concatenate([data_main, data_bm]),
+    #     99.5
+    # )
+    # plt.xlim(0, xmax)
 
-        plt.grid(True, which="both", linestyle="--", alpha=0.5)
-        plt.legend()
+    plt.xlabel("Transmission Delay (s)")
+    plt.ylabel("Empirical CDF")
+    plt.title("CDF of URLLC Transmission Delay")
 
-        plt.tight_layout()
-        plt.savefig(f"{figure_dir}/latency_{scenario_type}.png", dpi=300)
-        plt.close()
+    plt.grid(True, which="both", linestyle="--", alpha=0.5)
+    plt.legend()
 
-        print(f"[PLOT] {figure_dir}/latency_{scenario_type}.png")
+    plt.tight_layout()
+    plt.savefig(f"{figure_dir}/latency{tag}.png", dpi=300)
+    plt.close()
+
+    print(f"[PLOT] {figure_dir}/latency{tag}.png")
 
 
 # ==============================================================================
 # THỐNG KÊ THROUGHPUT (mean, std)
 # ==============================================================================
 
-def print_throughput_stats(results_main, results_bm):
-    """In mean và std của throughput cho cả 2 model."""
-    thr_main = np.array(results_main["throughput"])
-    thr_bm   = np.array(results_bm["throughput"])
+def print_throughput_stats(results_main_all, results_bm_all):
+    """
+    In mean và std của throughput + action entropy cho cả 2 model,
+    tách riêng theo từng scenario ("low"/"stable"/"high").
+
+    results_main_all, results_bm_all : dict[str, dict]
+        Kết quả trả về từ evaluate_scenario(), keyed theo scenario_type.
+    """
     print(f"\n=== Throughput Statistics ===")
-    print(f"  Framework  — mean: {np.mean(thr_main):.4f}, std: {np.std(thr_main):.4f}")
-    print(f"  Benchmark  — mean: {np.mean(thr_bm):.4f},  std: {np.std(thr_bm):.4f}")
+    for scenario_type, results_main in results_main_all.items():
+        results_bm = results_bm_all[scenario_type]
+        thr_main = np.array(results_main["throughput"])
+        thr_bm   = np.array(results_bm["throughput"])
+        print(f"-- Scenario: {scenario_type} --")
+        print(f"  Framework  — mean: {np.mean(thr_main):.4f}, std: {np.std(thr_main):.4f}")
+        print(f"  Benchmark  — mean: {np.mean(thr_bm):.4f},  std: {np.std(thr_bm):.4f}")
+
     print(f"\n=== Action Entropy Statistics ===")
-    ent_main = np.array(results_main["action_entropy"])
-    ent_bm   = np.array(results_bm["action_entropy"])
-    print(f"  Framework  — mean entropy: {np.mean(ent_main):.4f}, std: {np.std(ent_main):.4f}")
-    print(f"  Benchmark  — mean entropy: {np.mean(ent_bm):.4f},  std: {np.std(ent_bm):.4f}")
+    for scenario_type, results_main in results_main_all.items():
+        results_bm = results_bm_all[scenario_type]
+        ent_main = np.array(results_main["action_entropy"])
+        ent_bm   = np.array(results_bm["action_entropy"])
+        print(f"-- Scenario: {scenario_type} --")
+        print(f"  Framework  — mean entropy: {np.mean(ent_main):.4f}, std: {np.std(ent_main):.4f}")
+        print(f"  Benchmark  — mean entropy: {np.mean(ent_bm):.4f},  std: {np.std(ent_bm):.4f}")
 
 
 # ==============================================================================

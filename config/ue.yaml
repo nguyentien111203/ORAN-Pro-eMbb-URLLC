@@ -386,7 +386,7 @@ ues:
     slice_id: slice_embb_1
     thr: 10 # Mbps
 
-  - id: ue_32
+  - id: ue_64
     slice_id: slice_embb_2
     thr: 10 # Mbps
 
