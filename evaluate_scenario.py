@@ -332,7 +332,7 @@ def _plot_results(results_main, results_bm, figure_dir, suffix=None):
     tag = f"_{suffix}" if suffix else ""
 
     line_metrics = [
-        ("throughput",          "Throughput (bps)",    "Throughput"),
+        ("throughput",          "Throughput (Mbps)",    "Average Throughput each slice"),
         ("resource_efficiency", "Resource Efficiency", "Resource Efficiency"),
         ("energy_cost",         "Energy Cost",         "Energy Cost"),
         ("fragment_cost",       "Fragment Cost",       "Fragment Cost"),
@@ -475,6 +475,38 @@ def print_throughput_stats(results_main_all, results_bm_all):
         print(f"-- Scenario: {scenario_type} --")
         print(f"  Framework  — mean entropy: {np.mean(ent_main):.4f}, std: {np.std(ent_main):.4f}")
         print(f"  Benchmark  — mean entropy: {np.mean(ent_bm):.4f},  std: {np.std(ent_bm):.4f}")
+
+# print_extra_stats
+
+def print_extra_stats(results_main_all, results_bm_all):
+    print(f"\n=== Latency Statistics (URLLC, ms) ===")
+    for scenario_type, results_main in results_main_all.items():
+        results_bm = results_bm_all[scenario_type]
+        lat_main = np.array(results_main["latency"])
+        lat_bm   = np.array(results_bm["latency"])
+        print(f"-- Scenario: {scenario_type} --")
+        print(f"  Framework  — mean: {np.mean(lat_main):.4f}, std: {np.std(lat_main):.4f}, "
+              f"median: {np.median(lat_main):.4f}, p95: {np.percentile(lat_main,95):.4f}")
+        print(f"  Benchmark  — mean: {np.mean(lat_bm):.4f},  std: {np.std(lat_bm):.4f}, "
+              f"median: {np.median(lat_bm):.4f},  p95: {np.percentile(lat_bm,95):.4f}")
+
+    print(f"\n=== Resource Efficiency Statistics ===")
+    for scenario_type, results_main in results_main_all.items():
+        results_bm = results_bm_all[scenario_type]
+        re_main = np.array(results_main["resource_efficiency"])
+        re_bm   = np.array(results_bm["resource_efficiency"])
+        print(f"-- Scenario: {scenario_type} --")
+        print(f"  Framework  — mean: {np.mean(re_main):.4f}, std: {np.std(re_main):.4f}")
+        print(f"  Benchmark  — mean: {np.mean(re_bm):.4f},  std: {np.std(re_bm):.4f}")
+
+    print(f"\n=== Energy Cost Statistics ===")
+    for scenario_type, results_main in results_main_all.items():
+        results_bm = results_bm_all[scenario_type]
+        e_main = np.array(results_main["energy_cost"])
+        e_bm   = np.array(results_bm["energy_cost"])
+        print(f"-- Scenario: {scenario_type} --")
+        print(f"  Framework  — mean: {np.mean(e_main):.4f}, std: {np.std(e_main):.4f}")
+        print(f"  Benchmark  — mean: {np.mean(e_bm):.4f},  std: {np.std(e_bm):.4f}")
 
 
 # ==============================================================================
